@@ -1,0 +1,6 @@
+services:
+  api:
+    environment:
+      DATABASE_URL: ${RUNTIME_DATABASE_URL:?Set runtime least-privilege DATABASE_URL}
+      APP_ORIGIN: ${APP_ORIGIN:?Set HTTPS origin}
+      COOKIE_SECURE: 'true'

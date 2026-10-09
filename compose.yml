@@ -1,0 +1,83 @@
+name: assetflow
+x-api-env: &api-env
+  DATABASE_URL: postgres://assetflow:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/assetflow?sslmode=disable
+  APP_ORIGIN: ${APP_ORIGIN:-http://localhost:8088}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  TZ: Asia/Jakarta
+x-api: &api
+  image: assetflow-api:local
+  build: ./backend
+  environment: *api-env
+  networks: [internal]
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: assetflow
+      POSTGRES_USER: assetflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      TZ: Asia/Jakarta
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [internal]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U assetflow -d assetflow']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 1g
+  migrate:
+    <<: *api
+    command: [migrate]
+    depends_on:
+      db: {condition: service_healthy}
+    restart: 'no'
+  bootstrap:
+    <<: *api
+    profiles: [setup]
+    command: [bootstrap]
+    environment:
+      <<: *api-env
+      BOOTSTRAP_EMAIL: ${BOOTSTRAP_EMAIL:-admin@example.com}
+      BOOTSTRAP_PASSWORD: ${BOOTSTRAP_PASSWORD:-}
+      ORG_NAME: ${ORG_NAME:-My Organization}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+  api:
+    <<: *api
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8080/health/ready']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 512m
+    cpus: 1.0
+  web:
+    build: ./frontend
+    image: assetflow-web:local
+    ports: ['${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-8088}:8080']
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [internal]
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8080/']
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    mem_limit: 128m
+volumes:
+  postgres_data:
+networks:
+  internal:
