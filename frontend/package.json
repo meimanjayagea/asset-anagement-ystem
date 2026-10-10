@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc --noEmit && vite build",
-    "test:browser": "node tests/browser.cjs"
+    "test:browser": "node tests/browser.cjs",
+    "test:login": "node tests/login.cjs",
+    "test:flows": "node tests/run-browser.cjs",
+    "test:live": "node tests/live-login.cjs"
   },
   "dependencies": {
     "lucide-vue-next": "0.468.0",

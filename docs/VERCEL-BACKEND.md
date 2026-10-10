@@ -18,12 +18,22 @@ Docker-capable host.
   `https://frontend-iota-five-52.vercel.app`.
 - `COOKIE_SECURE`: `true`.
 
-The database schema is not created by starting the API. Run `/server migrate`
+By default, starting the API does not create the database schema. Run `/server migrate`
 once for a new database and once for each release that adds migrations, using a
 separate migration role. Run `/server bootstrap` only once against an empty
 database, with `BOOTSTRAP_EMAIL`, `BOOTSTRAP_PASSWORD`, and `ORG_NAME` supplied
 for that one-off operation. Do not expose migration-owner or bootstrap
 credentials to the API runtime.
+
+Alternatively, enable `AUTO_MIGRATE=true` and configure `MIGRATION_DATABASE_URL`
+with a schema-owner connection to the same database used by `DATABASE_URL`.
+Startup then applies missing migrations in one transaction before opening the
+HTTP listener. Multiple instances serialize using a transaction advisory lock.
+Prefer a direct database connection for migrations. Keep `DATABASE_URL` on the
+restricted runtime role, and remove the migration credential and disable
+`AUTO_MIGRATE` after the upgrade when using the separate migration-job model.
+Startup and `/health/ready` now validate login schema and session/audit privileges;
+database connectivity alone no longer reports readiness.
 
 The frontend currently calls same-origin `/api` and `/health` paths. Add
 frontend rewrites to the backend only after its database, schema, and health

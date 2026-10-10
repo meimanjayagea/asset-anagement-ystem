@@ -47,6 +47,11 @@ export interface Asset {
   next_maintenance_date: string | null;
   deleted_at?: string | null;
 }
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
 export async function api<T = any>(
   path: string,
   body?: unknown,
@@ -61,11 +66,13 @@ export async function api<T = any>(
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const data = await response.json();
+  const data = await response.json().catch(() => {
+    throw new ApiError("Layanan tidak tersedia. Coba lagi nanti.", response.status);
+  });
   if (!response.ok) {
     if (response.status === 401 && path !== "/login")
       window.dispatchEvent(new Event("session-expired"));
-    throw new Error(data.error || "Request gagal");
+    throw new ApiError(data.error || "Request gagal", response.status);
   }
   return data;
 }

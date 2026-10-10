@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node sql-v2.mjs"
+    "test": "node sql-v2.mjs && node login-migration.mjs"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8"

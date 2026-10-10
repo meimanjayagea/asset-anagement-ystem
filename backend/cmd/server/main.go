@@ -22,11 +22,32 @@ var migrations embed.FS
 
 func run() error {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
-	timeout := 30 * time.Second
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		timeout = 5 * time.Minute
+	command := "serve"
+	if len(os.Args) > 1 {
+		command = os.Args[1]
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if command != "serve" && command != "migrate" && command != "bootstrap" {
+		return fmt.Errorf("unknown command: %s", command)
+	}
+	if command == "migrate" || (command == "serve" && os.Getenv("AUTO_MIGRATE") == "true") {
+		migrationDSN := os.Getenv("MIGRATION_DATABASE_URL")
+		if migrationDSN == "" && command == "migrate" {
+			migrationDSN = os.Getenv("DATABASE_URL")
+		}
+		if migrationDSN == "" {
+			return fmt.Errorf("MIGRATION_DATABASE_URL required for AUTO_MIGRATE")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		err := migrateDatabase(ctx, migrationDSN)
+		cancel()
+		if err != nil {
+			return err
+		}
+		if command == "migrate" {
+			return nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -41,9 +62,6 @@ func run() error {
 	cfg.MaxConnLifetime = time.Hour
 	cfg.ConnConfig.RuntimeParams["timezone"] = "Asia/Jakarta"
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = "10000"
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		cfg.ConnConfig.RuntimeParams["statement_timeout"] = "240000"
-	}
 	db, e := pgxpool.NewWithConfig(ctx, cfg)
 	if e != nil {
 		return e
@@ -52,50 +70,9 @@ func run() error {
 	if e = db.Ping(ctx); e != nil {
 		return e
 	}
-	if len(os.Args) > 1 && os.Args[1] == "migrate" {
-		conn, e := db.Acquire(ctx)
-		if e != nil {
-			return e
-		}
-		defer conn.Release()
-		if _, e = conn.Exec(ctx, `SELECT pg_advisory_lock(7842301)`); e != nil {
-			return e
-		}
-		defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock(7842301)`)
-		_, e = conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`)
-		if e != nil {
-			return e
-		}
-
-		for _, migration := range []struct {
-			Version int
-			File    string
-		}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}, {6, "006_employee_login.sql"}} {
-			var exists bool
-			if e = conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.Version).Scan(&exists); e != nil {
-				return e
-			}
-			if exists {
-				continue
-			}
-			b, e := migrations.ReadFile("migrations/" + migration.File)
-			if e != nil {
-				return e
-			}
-			tx, e := conn.Begin(ctx)
-			if e != nil {
-				return e
-			}
-			if _, e = tx.Exec(ctx, string(b)); e != nil {
-				_ = tx.Rollback(ctx)
-				return e
-			}
-			if e = tx.Commit(ctx); e != nil {
-				return e
-			}
-			slog.Info("migration applied", "version", migration.Version)
-		}
-		return nil
+	server := &app.Server{DB: db}
+	if e = server.CheckReadiness(ctx); e != nil {
+		return e
 	}
 	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
 		pw := os.Getenv("BOOTSTRAP_PASSWORD")
@@ -166,7 +143,9 @@ func run() error {
 	if port == "" {
 		port = "8080"
 	}
-	srv := &http.Server{Addr: ":" + port, Handler: (&app.Server{DB: db, Origin: origin, Secure: secure}).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	server.Origin = origin
+	server.Secure = secure
+	srv := &http.Server{Addr: ":" + port, Handler: server.Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	done := make(chan error, 1)
 	go func() { slog.Info("listening", "address", srv.Addr); done <- srv.ListenAndServe() }()
 	sig := make(chan os.Signal, 1)

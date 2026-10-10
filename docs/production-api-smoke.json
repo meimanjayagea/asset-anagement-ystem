@@ -1,0 +1,201 @@
+{
+  "checked_at": "2026-10-10T14:18:13.494Z",
+  "origin": "https://frontend-iota-five-52.vercel.app",
+  "scope": "Unauthenticated GET probes only; authenticated production workflows were not tested",
+  "passed": 2,
+  "total": 24,
+  "results": [
+    {
+      "path": "/health/live",
+      "expected": 200,
+      "status": 200,
+      "pass": true,
+      "request_id": "a8d26acc5a5872aba2a56fcf4adadde199fd8afe238e4e008f80a745b257a443",
+      "body": "{\"status\":\"ok\"}\n"
+    },
+    {
+      "path": "/health/ready",
+      "expected": 200,
+      "status": 200,
+      "pass": true,
+      "request_id": "83ffea199f20d6240990162adbb4da16fb30e136871af9d94964ead02d2b42d7",
+      "body": "{\"status\":\"ok\"}\n"
+    },
+    {
+      "path": "/api/login/options",
+      "expected": 200,
+      "status": 503,
+      "pass": false,
+      "request_id": "ff9476bae6ae2d97f699b5b81057234b19175f248368821707c4357f13f7bf42",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/me",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "1d11ed4e88fd0de909c65d68e928f7a66d419db74382499ae05e900f861fca25",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/dashboard",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "764ff4775ac611ba570aafd8e32f05353bc37c61be0c9b305c68c4c77763cfb4",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/assets",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "6af0d42344c487b9785cf0a5d91a505ca0bbfb641786006cdff51a9e8ea9497d",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/assets/1/history",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "eaaca377f51d38186ea9e5c1ae0e129e9fb2862286d32d6dc4969d21df1c6b2b",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/locations",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "28da0b41928cf9cd87438704517b6eb48a35d1fcc8d5d35a8f6a4386591872d8",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/categories",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "18ecbb20bdb942a97a86d809ed046894fa7436114188598a244cde201470e785",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/requests",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "c5d9cb241d1ba4a38c7f742d2ab3b4c3d21907975025c790b7b5579ce6f98441",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/maintenance",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "40fd4f3ac1a4ab91134aaf753b490f6f130d9599e163e3e48ab7b65f99a8424e",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/audit",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "110ae5fb7b15af7ad784ea7f55507bf89247cd6a78385f76426bae959311fce4",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/users",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "92319ac812501b9f4714b45a68d6d2cd765b3c98fe8162c44725bc429418f630",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/user-roles",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "39e5837c1bc332bf9a21ca92511c251c73ea6c50d84bf58243cc7bb907afdeef",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/stocktakes",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "00a6190ea74cb1a7d6c55ffcae01c6c307713f10206459d848da57d818326fc0",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/stocktakes/1/items",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "20cffac196f5f3c9690531605609aa2ad9e67600aef910c4cdeeb493993a1162",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/branches",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "5a25c2068cfd90e456761196ccf37b8867829fa9ff7bdad43195d9ac7be712f9",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/activity",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "be133970f5bf641209f8fbbabe6bbe4a0aba402f75183b305755b79606282b9d",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/contracts",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "416f60a19641ab8b095aca7b9cbcf47085b40f41ced35ad16f00283ebdcb4e5a",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/finance/settings",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "5fcffcadb105b652faa47abfe707bdb39ddbaa03918b3a9b779df16860a5a158",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/finance/valuations",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "67e1cf28ecdc778ac4d7a6fa5b31b41cde13fa987b53c7c90304883b3d85fe03",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/finance/depreciation",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "e7a9f1b8337fab7e2a1e8107db49444ecfe138936a7411ef17ddf508f24d017f",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/finance/journals",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "6f0a7cb51b6a171537049d6693538c7e3274272a36081340dbc824a72240a5aa",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    },
+    {
+      "path": "/api/reports/compliance",
+      "expected": 401,
+      "status": 503,
+      "pass": false,
+      "request_id": "ead80172ea6bb4c8d83695978732bc83d7cfb779b8411675fd3c4b2c45c86e9b",
+      "body": "{\"error\":\"Audit aktivitas tidak tersedia; refresh untuk memastikan hasil aksi\"}\n"
+    }
+  ]
+}

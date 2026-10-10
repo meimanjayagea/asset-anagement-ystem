@@ -113,7 +113,8 @@ func (s *Server) Routes() http.Handler {
 	m.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		c, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		if e := s.DB.Ping(c); e != nil {
+		if e := s.CheckReadiness(c); e != nil {
+			slog.Error("readiness failed", "error", e)
 			write(w, 503, map[string]string{"status": "unavailable"})
 			return
 		}

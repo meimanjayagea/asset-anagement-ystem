@@ -5,11 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -119,7 +125,38 @@ func TestAPIIntegration(t *testing.T) {
 	if e = tx.Commit(ctx); e != nil {
 		t.Fatal(e)
 	}
-	h := (&Server{DB: db, Origin: "http://localhost", Secure: false}).Routes()
+	runtimeRole := fmt.Sprintf("test_runtime_%d", time.Now().UnixNano())
+	if _, e = base.Exec(ctx, "CREATE ROLE "+runtimeRole+" NOLOGIN"); e != nil {
+		t.Fatal(e)
+	}
+	defer func() {
+		db.Close()
+		base.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		base.Exec(context.Background(), "REVOKE CONNECT ON DATABASE "+pgx.Identifier{cfg.ConnConfig.Database}.Sanitize()+" FROM "+runtimeRole)
+		base.Exec(context.Background(), "DROP ROLE "+runtimeRole)
+	}()
+	grants, e := os.ReadFile("../../../docs/least-privilege.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	grantSQL := strings.NewReplacer("assetflow_runtime", runtimeRole, "ON DATABASE assetflow", "ON DATABASE "+pgx.Identifier{cfg.ConnConfig.Database}.Sanitize(), "ON SCHEMA public", "ON SCHEMA "+schema, "IN SCHEMA public", "IN SCHEMA "+schema).Replace(string(grants))
+	if _, e = db.Exec(ctx, grantSQL); e != nil {
+		t.Fatal(e)
+	}
+	runtimeCfg := cfg.Copy()
+	runtimeCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		_, err := conn.Exec(ctx, "SET ROLE "+runtimeRole)
+		return err
+	}
+	runtimeDB, e := pgxpool.NewWithConfig(ctx, runtimeCfg)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer runtimeDB.Close()
+	h := (&Server{DB: runtimeDB, Origin: "http://localhost", Secure: false}).Routes()
+	covered := map[string]int{}
+	var coverageMu sync.Mutex
+	resourceID := regexp.MustCompile(`/[0-9]+`)
 	call := func(method, path, cookie string, body any) *httptest.ResponseRecorder {
 		var b []byte
 		if body != nil {
@@ -134,6 +171,12 @@ func TestAPIIntegration(t *testing.T) {
 		}
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
+		if w.Code >= 200 && w.Code < 300 {
+			key := method + " " + resourceID.ReplaceAllString(strings.Split(path, "?")[0], "/{id}")
+			coverageMu.Lock()
+			covered[key]++
+			coverageMu.Unlock()
+		}
 		return w
 	}
 	expect := func(t *testing.T, w *httptest.ResponseRecorder, status int) {
@@ -175,6 +218,24 @@ func TestAPIIntegration(t *testing.T) {
 		if len(options.Organizations) != 2 || options.Organizations[0].Code != "ORG-000001" || options.Organizations[0].Name != "One" {
 			t.Fatalf("unexpected login options: %s", w.Body.String())
 		}
+	})
+	t.Run("readiness-requires-login-schema", func(t *testing.T) {
+		expect(t, call("GET", "/health/ready", "", nil), 200)
+		if _, err := db.Exec(ctx, `DELETE FROM schema_migrations WHERE version=6`); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("GET", "/health/ready", "", nil), 503)
+		if _, err := db.Exec(ctx, `INSERT INTO schema_migrations(version) VALUES(6)`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(ctx, `ALTER TABLE user_activity_logs RENAME COLUMN identity_hash TO email_hash`); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("GET", "/health/ready", "", nil), 503)
+		if _, err := db.Exec(ctx, `ALTER TABLE user_activity_logs RENAME COLUMN email_hash TO identity_hash`); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("GET", "/health/ready", "", nil), 200)
 	})
 	t.Run("authorization-and-tenant", func(t *testing.T) {
 		expect(t, call("GET", "/api/assets", "", nil), 401)
@@ -273,6 +334,22 @@ func TestAPIIntegration(t *testing.T) {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		expect(t, w, 403)
+		r = httptest.NewRequest("POST", "/api/logout", strings.NewReader("{}"))
+		r.Header.Set("Cookie", admin)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Requested-With", "AssetFlow")
+		r.Header.Set("Origin", "https://foreign.example.test")
+		w = httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		expect(t, w, 403)
+	})
+	t.Run("audit-permission-failure-is-not-ready", func(t *testing.T) {
+		if _, err := db.Exec(ctx, "REVOKE INSERT ON user_activity_logs FROM "+runtimeRole); err != nil {
+			t.Fatal(err)
+		}
+		defer db.Exec(ctx, "GRANT INSERT ON user_activity_logs TO "+runtimeRole)
+		expect(t, call("GET", "/health/ready", "", nil), 503)
+		expect(t, call("GET", "/api/dashboard", admin, nil), 503)
 	})
 
 	t.Run("branch-scopes-and-activity", func(t *testing.T) {
@@ -555,10 +632,139 @@ func TestAPIIntegration(t *testing.T) {
 		financeContracts := call("GET", "/api/contracts?branch_id=1", finance, nil)
 		expect(t, financeContracts, 200)
 	})
+	t.Run("all-list-endpoints", func(t *testing.T) {
+		period := time.Now().In(financeZone).Format("2006-01")
+		for _, path := range []string{"/health/live", "/api/me", "/api/dashboard", "/api/assets/1/history", "/api/locations", "/api/categories", "/api/requests", "/api/maintenance", "/api/stocktakes", "/api/stocktakes/1/items", "/api/users", "/api/user-roles", "/api/branches", "/api/finance/valuations", "/api/finance/depreciation?period=" + period, "/api/finance/journals?period=" + period} {
+			t.Run(path, func(t *testing.T) { expect(t, call("GET", path, admin, nil), 200) })
+		}
+	})
+	t.Run("master-create-archive-restore", func(t *testing.T) {
+		create := func(path string, body any) int64 {
+			w := call("POST", path, admin, body)
+			expect(t, w, 201)
+			var item struct {
+				ID int64 `json:"id"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &item); err != nil || item.ID == 0 {
+				t.Fatalf("missing ID: %s", w.Body.String())
+			}
+			return item.ID
+		}
+		branchID := create("/api/branches", map[string]any{"code": "UAT", "name": "UAT branch", "address": "Test only"})
+		locationID := create("/api/locations", map[string]any{"name": "UAT room", "branch_id": branchID})
+		categoryID := create("/api/categories", map[string]any{"name": "UAT devices", "useful_life_months": 48, "branch_id": branchID})
+		userID := create("/api/users", map[string]any{"name": "UAT Employee", "email": "uat@example.test", "password": "test-password-123", "role": "employee", "all_branches": false, "branch_ids": []int64{branchID}})
+		for kind, itemID := range map[string]int64{"users": userID, "locations": locationID, "categories": categoryID} {
+			path := fmt.Sprintf("/api/%s/%d", kind, itemID)
+			expect(t, call("DELETE", path, admin, nil), 200)
+			expect(t, call("GET", "/api/"+kind+"?archived=true", admin, nil), 200)
+			expect(t, call("POST", path+"/restore", admin, map[string]any{}), 200)
+		}
+		branchPath := fmt.Sprintf("/api/branches/%d", branchID)
+		expect(t, call("DELETE", branchPath, admin, nil), 200)
+		var active bool
+		if err := db.QueryRow(ctx, `SELECT active FROM users WHERE id=$1`, userID).Scan(&active); err != nil || active {
+			t.Fatalf("branch archive must deactivate orphaned user: %v", err)
+		}
+		expect(t, call("GET", "/api/branches?archived=true", admin, nil), 200)
+		expect(t, call("POST", branchPath+"/restore", admin, map[string]any{}), 200)
+		expect(t, call("POST", fmt.Sprintf("/api/users/%d/access", userID), admin, map[string]any{"role": "employee", "active": true, "all_branches": false, "branch_ids": []int64{branchID}}), 200)
+		contractID := create("/api/contracts", map[string]any{"branch_id": branchID, "name": "UAT contract", "vendor": "UAT vendor", "start_date": "2026-01-01", "end_date": "2027-01-01", "annual_cost": 1000})
+		expect(t, call("DELETE", fmt.Sprintf("/api/contracts/%d", contractID), admin, nil), 200)
+	})
+	t.Run("disposal-cancel-maintenance-and-stocktake-discrepancy", func(t *testing.T) {
+		body := assetBody("UAT-LIFECYCLE")
+		w := call("POST", "/api/assets", admin, body)
+		expect(t, w, 201)
+		var created struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+			t.Fatal(err)
+		}
+		w = call("POST", "/api/maintenance", admin, map[string]any{"asset_id": created.ID, "title": "Cancelled service", "due_date": "2026-10-01", "version": 1})
+		expect(t, w, 201)
+		var jobID int64
+		if err := db.QueryRow(ctx, `SELECT id FROM maintenance WHERE asset_id=$1`, created.ID).Scan(&jobID); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/maintenance/%d/action", jobID), admin, map[string]any{"action": "cancel", "version": 1}), 200)
+		w = call("POST", "/api/stocktakes", admin, map[string]any{"title": "UAT discrepancies", "location_id": 1})
+		expect(t, w, 201)
+		var stockID int64
+		if err := db.QueryRow(ctx, `SELECT id FROM stocktakes WHERE title='UAT discrepancies'`).Scan(&stockID); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/stocktakes/%d/close", stockID), admin, map[string]any{"acknowledge_discrepancies": false}), 409)
+		expect(t, call("POST", fmt.Sprintf("/api/stocktakes/%d/close", stockID), admin, map[string]any{"acknowledge_discrepancies": true}), 200)
+		w = call("POST", "/api/requests", admin, map[string]any{"asset_id": created.ID, "kind": "dispose", "reason": "UAT retirement", "version": 2, "disposal_proceeds": 500000})
+		expect(t, w, 201)
+		var requestID int64
+		if err := db.QueryRow(ctx, `SELECT id FROM requests WHERE asset_id=$1 AND status='pending'`, created.ID).Scan(&requestID); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/requests/%d/decision", requestID), manager, map[string]any{"approve": true}), 200)
+		var state string
+		if err := db.QueryRow(ctx, `SELECT status FROM assets WHERE id=$1`, created.ID).Scan(&state); err != nil || state != "disposed" {
+			t.Fatalf("disposal failed: %s (%v)", state, err)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/assets/%d/action", created.ID), admin, map[string]any{"action": "assign", "custodian": "Forbidden", "version": 3}), 409)
+	})
+	t.Run("logout-and-login-throttle", func(t *testing.T) {
+		fresh := cookie("admin", 1)
+		expect(t, call("POST", "/api/logout", fresh, map[string]any{}), 200)
+		expect(t, call("GET", "/api/me", fresh, nil), 401)
+		for i := 0; i < 10; i++ {
+			expect(t, call("POST", "/api/login", "", map[string]any{"org_code": "ORG-000001", "employee_id": "EMP-UNKNOWN", "password": "wrong"}), 401)
+		}
+		expect(t, call("POST", "/api/login", "", map[string]any{"org_code": "ORG-000001", "employee_id": "EMP-UNKNOWN", "password": "wrong"}), 429)
+	})
 	t.Run("revoke-access-and-password", func(t *testing.T) {
 		expect(t, call("POST", "/api/users/3/access", admin, map[string]any{"role": "operator", "active": false, "all_branches": false, "branch_ids": []int64{1}}), 200)
 		expect(t, call("GET", "/api/me", operator, nil), 401)
 		expect(t, call("POST", "/api/password", manager, map[string]any{"current_password": "test-password-123", "new_password": "changed-password-456"}), 200)
 		expect(t, call("GET", "/api/me", manager, nil), 401)
+	})
+	t.Run("every-registered-endpoint-has-success-coverage", func(t *testing.T) {
+		file, err := parser.ParseFile(gotoken.NewFileSet(), "server.go", nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		ast.Inspect(file, func(node ast.Node) bool {
+			routeCall, ok := node.(*ast.CallExpr)
+			if !ok || len(routeCall.Args) == 0 {
+				return true
+			}
+			name := ""
+			switch fn := routeCall.Fun.(type) {
+			case *ast.Ident:
+				name = fn.Name
+			case *ast.SelectorExpr:
+				name = fn.Sel.Name
+			}
+			if name != "add" && name != "HandleFunc" {
+				return true
+			}
+			literal, ok := routeCall.Args[0].(*ast.BasicLit)
+			if !ok {
+				return true
+			}
+			pattern, err := strconv.Unquote(literal.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			count++
+			if covered[pattern] == 0 {
+				t.Errorf("no successful API test for %s", pattern)
+			}
+			if name == "add" {
+				parts := strings.SplitN(pattern, " ", 2)
+				path := strings.ReplaceAll(parts[1], "{id}", "1")
+				expect(t, call(parts[0], path, "", map[string]any{}), 401)
+			}
+			return true
+		})
+		t.Logf("Successfully tested %d registered endpoints", count)
 	})
 }

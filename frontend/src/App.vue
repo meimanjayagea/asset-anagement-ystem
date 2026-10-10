@@ -42,6 +42,7 @@ import {
 import FinanceWorkspace from "./FinanceWorkspace.vue";
 import {
   api,
+  ApiError,
   money,
   date,
   timestamp,
@@ -726,15 +727,21 @@ onMounted(async () => {
   try {
     const options = await api<{ organizations: LoginOrganization[] }>("/login/options");
     loginOrganizations.value = options.organizations;
+  } catch (e) {
+    error.value = (e as Error).message;
+    initializing.value = false;
+    return;
+  }
+  try {
     const sessionUser = await api<User>("/me");
     me.value = sessionUser;
     branch.value = sessionUser.active_branch_id;
     await masters();
     await loadAssignableRoles();
     await load();
-  } catch {
+  } catch (e) {
     me.value = null;
-    error.value = "";
+    error.value = e instanceof ApiError && e.status === 401 ? "" : (e as Error).message;
   } finally {
     initializing.value = false;
   }

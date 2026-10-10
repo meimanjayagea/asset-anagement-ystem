@@ -35,6 +35,8 @@ jobs:
           web_pid=$!
           trap 'kill "$web_pid"' EXIT
           npm run test:browser
+      - run: npm run test:login
+        working-directory: frontend
   sql-upgrade:
     runs-on: ubuntu-latest
     steps:
@@ -43,6 +45,46 @@ jobs:
         with: {node-version: '24', cache: npm, cache-dependency-path: validation/package-lock.json}
       - run: npm ci && npm test
         working-directory: validation
+  live-flow:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: {POSTGRES_PASSWORD: test, POSTGRES_DB: assetflow}
+        ports: ['5432:5432']
+        options: --health-cmd="pg_isready -U postgres" --health-interval=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.26.9', cache-dependency-path: backend/go.sum}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: frontend/package-lock.json}
+      - run: go build -o /tmp/assetflow-server ./cmd/server
+        working-directory: backend
+      - run: npm ci && npm run build && npx playwright install --with-deps chromium
+        working-directory: frontend
+      - name: Live login and asset persistence
+        working-directory: frontend
+        env:
+          DATABASE_URL: postgres://postgres:test@localhost:5432/assetflow?sslmode=disable
+          APP_ORIGIN: http://127.0.0.1:18089
+          COOKIE_SECURE: 'false'
+          PORT: '18088'
+          BOOTSTRAP_EMAIL: meiman@example.test
+          BOOTSTRAP_PASSWORD: AssetFlow-UAT-2026
+          TEST_LOGIN_PASSWORD: AssetFlow-UAT-2026
+          ORG_NAME: AssetFlow CI test
+        run: |
+          /tmp/assetflow-server migrate
+          /tmp/assetflow-server bootstrap
+          /tmp/assetflow-server >/tmp/assetflow-live.log 2>&1 &
+          api_pid=$!
+          trap 'kill "$api_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18088/health/ready >/dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:live
   containers:
     runs-on: ubuntu-latest
     steps:
