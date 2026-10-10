@@ -332,7 +332,11 @@ func TestAPIIntegration(t *testing.T) {
 		if e := db.QueryRow(ctx, `SELECT name FROM assets WHERE id=$1`, branchAsset).Scan(&editedName); e != nil || editedName != "Branch-managed laptop" {
 			t.Fatalf("branch admin could not edit its asset: %q (%v)", editedName, e)
 		}
-		expect(t, call("POST", "/api/assets/1", branchAdmin, map[string]any{"tag": "CROSS-BRANCH", "name": "Forbidden", "category_id": 1, "location_id": 1, "purchase_date": "2026-01-01", "purchase_cost": 0, "salvage_value": 0, "useful_life_months": 48, "version": 1}), 404)
+		var foreignAsset int64
+		if e := db.QueryRow(ctx, `INSERT INTO assets(org_id,tag,name,category_id,location_id,purchase_date,purchase_cost,salvage_value,useful_life_months,depreciation_method,depreciation_start_date) VALUES(1,'FOREIGN-1','Foreign branch laptop',1,1,'2026-01-01',0,0,48,'straight_line','2026-01-01') RETURNING id`).Scan(&foreignAsset); e != nil {
+			t.Fatal(e)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/assets/%d", foreignAsset), branchAdmin, map[string]any{"tag": "CROSS-BRANCH", "name": "Forbidden", "category_id": 1, "location_id": 1, "purchase_date": "2026-01-01", "purchase_cost": 0, "salvage_value": 0, "useful_life_months": 48, "depreciation_method": "straight_line", "depreciation_start_date": "2026-01-01", "version": 1}), 404)
 		branchAssets := call("GET", "/api/assets", branchAdmin, nil)
 		expect(t, branchAssets, 200)
 		if !strings.Contains(branchAssets.Body.String(), "BRANCH-1") || !strings.Contains(branchAssets.Body.String(), "9900000") {
@@ -493,6 +497,18 @@ func TestAPIIntegration(t *testing.T) {
 		decisionPath := fmt.Sprintf("/api/finance/valuations/%d/decision", valuationID)
 		expect(t, call("POST", decisionPath, finance, map[string]any{"approve": true}), 403)
 		expect(t, call("POST", decisionPath, admin, map[string]any{"approve": true}), 200)
+		var financeUserID, valuationBranchID, assetBranchID int64
+		var valuationStatus, effectiveDate string
+		var branchAllowed bool
+		if e := db.QueryRow(ctx, `SELECT id FROM users WHERE org_id=1 AND email='finance@test.local'`).Scan(&financeUserID); e != nil {
+			t.Fatal(e)
+		}
+		if e := db.QueryRow(ctx, `SELECT v.status,v.effective_date::text,v.branch_id,l.branch_id,can_access_branch(v.org_id,$2,v.branch_id) FROM asset_valuations v JOIN assets a ON a.org_id=v.org_id AND a.id=v.asset_id JOIN locations l ON l.org_id=a.org_id AND l.id=a.location_id WHERE v.org_id=1 AND v.id=$1`, valuationID, financeUserID).Scan(&valuationStatus, &effectiveDate, &valuationBranchID, &assetBranchID, &branchAllowed); e != nil {
+			t.Fatal(e)
+		}
+		if valuationStatus != "approved" || !strings.HasPrefix(effectiveDate, period) || valuationBranchID != 1 || assetBranchID != 1 || !branchAllowed {
+			t.Fatalf("valuation is not journal-eligible: status=%s effective_date=%s valuation_branch=%d asset_branch=%d finance_access=%t period=%s", valuationStatus, effectiveDate, valuationBranchID, assetBranchID, branchAllowed, period)
+		}
 
 		accounts := map[string]string{"asset_account": "1500", "accumulated_depreciation_account": "1590", "depreciation_expense_account": "6000", "cash_account": "1100", "disposal_gain_account": "7990", "disposal_loss_account": "6990", "revaluation_reserve_account": "3100", "impairment_expense_account": "6900"}
 		expect(t, call("POST", "/api/finance/settings", finance, accounts), 200)
