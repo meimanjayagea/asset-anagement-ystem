@@ -38,3 +38,18 @@ Generate and validate the bundle with `node validation/login-migration.mjs`
 after installing the validation dependencies. It tests upgrades from empty,
 v4, v5 and v6 databases, repeat application, existing credentials, immutable
 audit history, and the current backend's actual activity INSERT statement.
+
+## Operator-authorized password recovery
+
+Use `/server reset-password` with `RECOVERY_ORG_CODE`, `RECOVERY_EMAIL`,
+`RECOVERY_PASSWORD` (12-72 bytes), and a unique `RECOVERY_OPERATION_ID` (16-100
+bytes) to reset only an existing active, non-archived account. Account roles and
+branch assignments remain unchanged. The reset, session revocation and audit
+entry commit atomically. The password and its hash are never logged or audited.
+
+For a managed connection accessible only inside a deployment, temporarily enable
+`ACCOUNT_RECOVERY=true` and supply the four recovery variables, storing the
+password as sensitive. Deploy and verify login, then disable recovery, remove
+the temporary variables and redeploy. A persisted audit operation marker and
+account row lock prevent duplicate cold starts from resetting the password
+again or revoking newly created sessions. There is no public recovery endpoint.

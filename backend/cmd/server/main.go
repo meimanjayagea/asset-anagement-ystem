@@ -26,7 +26,7 @@ func run() error {
 	if len(os.Args) > 1 {
 		command = os.Args[1]
 	}
-	if command != "serve" && command != "migrate" && command != "bootstrap" {
+	if command != "serve" && command != "migrate" && command != "bootstrap" && command != "reset-password" {
 		return fmt.Errorf("unknown command: %s", command)
 	}
 	if command == "migrate" || (command == "serve" && os.Getenv("AUTO_MIGRATE") == "true") {
@@ -70,6 +70,14 @@ func run() error {
 	server := &app.Server{DB: db}
 	if e = server.CheckReadiness(ctx); e != nil {
 		return e
+	}
+	if command == "reset-password" || (command == "serve" && os.Getenv("ACCOUNT_RECOVERY") == "true") {
+		if e = resetAccountPassword(ctx, db, os.Getenv("RECOVERY_ORG_CODE"), os.Getenv("RECOVERY_EMAIL"), os.Getenv("RECOVERY_PASSWORD"), os.Getenv("RECOVERY_OPERATION_ID")); e != nil {
+			return e
+		}
+		if command == "reset-password" {
+			return nil
+		}
 	}
 	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
 		pw := os.Getenv("BOOTSTRAP_PASSWORD")
