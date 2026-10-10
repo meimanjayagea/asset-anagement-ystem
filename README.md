@@ -126,3 +126,5 @@ Dokumentasi utama:
 Tidak ada onboarding organisasi self-service, master employee directory, edit umum aset setelah registrasi, background work-order/notification scheduler (tanggal due sudah otomatis), email notifications, full CSV import/export, attachments, QR camera scanner, ERP journal, fiscal depreciation, OIDC/MFA, approval multilevel, warranty reminder worker, offline mobile, atau soft-delete master. Tag stocktake dapat diketik atau diinput USB scanner sebagai keyboard. Custodian adalah teks wajib, belum foreign key pegawai. Perubahan master/kesalahan registrasi saat ini perlu workflow koreksi terkontrol oleh DBA; jangan mengubah audit.
 
 Roadmap dan acceptance gates untuk masing-masing ada di analisis. Batas ini berarti **enterprise rollout masih membutuhkan pekerjaan lanjutan**, walaupun core source dan Docker packaging sudah disediakan.
+
+
