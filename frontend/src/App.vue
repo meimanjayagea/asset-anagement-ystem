@@ -30,8 +30,27 @@ import {
   KeyRound,
   Building2,
   History,
+  Clock3,
+  Moon,
+  Sun,
+  Landmark,
+  Languages,
+  Archive,
+  ArchiveRestore,
+  Pencil,
 } from "lucide-vue-next";
-import { api, money, date, timestamp, type User, type Asset } from "./api";
+import FinanceWorkspace from "./FinanceWorkspace.vue";
+import {
+  api,
+  money,
+  date,
+  timestamp,
+  type User,
+  type Asset,
+  type LoginOrganization,
+  type RoleOption,
+} from "./api";
+import { locale, theme, t, toggleTheme } from "./preferences";
 const me = ref<User | null>(null),
   initializing = ref(true),
   loading = ref(false),
@@ -41,7 +60,9 @@ const me = ref<User | null>(null),
   page = ref("dashboard"),
   modal = ref(""),
   selected = ref<Asset | null>(null);
-const login = reactive({ email: "", password: "", org_id: 1 }),
+const login = reactive({ email: "", password: "", org_id: 0, branch_id: 0 }),
+  loginOrganizations = ref<LoginOrganization[]>([]),
+  roleOptions = ref<RoleOption[]>([]),
   stats = ref<Record<string, number>>({}),
   assets = ref<Asset[]>([]),
   records = ref<any[]>([]),
@@ -53,64 +74,109 @@ const login = reactive({ email: "", password: "", org_id: 1 }),
   status = ref("");
 const branches = ref<any[]>([]),
   branch = ref(0),
-  activityEvent = ref("");
+  showArchived = ref(false),
+  activityEvent = ref(""),
+  historyRecords = ref<any[]>([]);
 const assetLocations = computed(() =>
   locations.value.filter((l) => l.branch_id === form.value.asset_branch_id),
 );
 const form = ref<Record<string, any>>({});
-const canWrite = computed(() => !!me.value && me.value.role !== "auditor"),
-  canManage = computed(() =>
-    ["admin", "manager"].includes(me.value?.role || ""),
-  ),
-  canAudit = computed(() =>
-    ["admin", "manager", "auditor"].includes(me.value?.role || ""),
-  );
-const nav = computed(() => [
-  { key: "dashboard", label: "Overview", icon: LayoutDashboard },
-  { key: "assets", label: "Asset register", icon: Boxes },
-  { key: "requests", label: "Approvals", icon: ArrowLeftRight },
-  { key: "maintenance", label: "Maintenance", icon: Wrench },
-  { key: "stocktakes", label: "Stocktake", icon: ClipboardCheck },
-  { key: "branches", label: "Branches", icon: Building2 },
-  { key: "locations", label: "Locations", icon: MapPin },
-  { key: "categories", label: "Categories", icon: Layers },
-  ...(canAudit.value
-    ? [
-        { key: "audit", label: "Audit trail", icon: ShieldCheck },
-        { key: "activity", label: "User activity", icon: History },
-      ]
-    : []),
-  ...(me.value?.role === "admin"
-    ? [{ key: "users", label: "Team & access", icon: Users }]
-    : []),
-]);
+function can(capability: string) {
+  return !!me.value?.capabilities?.includes(capability);
+}
+const roleNames: Record<string, string> = {
+  admin: "role.admin",
+  branch_admin: "role.branch_admin",
+  manager: "role.manager",
+  operator: "role.operator",
+  staff: "role.staff",
+  employee: "role.employee",
+  finance: "role.finance",
+  it_support: "role.it_support",
+  it_developer: "role.it_developer",
+  auditor: "role.auditor",
+};
+function roleLabel(role: string) {
+  return roleNames[role] ? t(roleNames[role]) : role;
+}
+function copy(id: string, en: string) {
+  return locale.value === "id" ? id : en;
+}
+const canWrite = computed(() => can("assets.write"));
+const nav = computed(() =>
+  [
+    { key: "dashboard", label: t("nav.dashboard"), icon: LayoutDashboard, cap: "dashboard.read" },
+    { key: "assets", label: t("nav.assets"), icon: Boxes, cap: "assets.read" },
+    { key: "requests", label: t("nav.requests"), icon: ArrowLeftRight, cap: "requests.read" },
+    { key: "maintenance", label: t("nav.maintenance"), icon: Wrench, cap: "maintenance.read" },
+    { key: "stocktakes", label: t("nav.stocktakes"), icon: ClipboardCheck, cap: "stocktakes.read" },
+    { key: "branches", label: t("nav.branches"), icon: Building2, cap: "branches.read" },
+    { key: "locations", label: t("nav.locations"), icon: MapPin, cap: "locations.read" },
+    { key: "categories", label: t("nav.categories"), icon: Layers, cap: "categories.read" },
+    { key: "audit", label: t("nav.audit"), icon: ShieldCheck, cap: "audit.read" },
+    { key: "activity", label: t("nav.activity"), icon: History, cap: "activity.read" },
+    { key: "users", label: t("nav.users"), icon: Users, cap: "users.read" },
+    { key: "finance", label: t("nav.finance"), icon: Landmark, cap: can("finance.read") ? "finance.read" : "reports.read", show: can("finance.read") || can("reports.read") },
+  ].filter((item: any) => item.show !== false && can(item.cap)),
+);
+watch(
+  () => login.org_id,
+  () => {
+    login.branch_id = 0;
+  },
+);
+watch(
+  () => form.value.role,
+  (role) => {
+    if (role === "admin") {
+      form.value.all_branches = true;
+      form.value.branch_ids = [];
+    }
+    if (role === "branch_admin") {
+      form.value.all_branches = false;
+      form.value.branch_ids = (form.value.branch_ids || []).slice(0, 1);
+    }
+  },
+);
+function setBranchScope(id: number, checked: boolean) {
+  const selected = form.value.branch_ids || [];
+  if (form.value.role === "branch_admin") {
+    form.value.branch_ids = checked ? [id] : [];
+  } else if (checked) {
+    form.value.branch_ids = [...new Set([...selected, id])];
+  } else {
+    form.value.branch_ids = selected.filter((value: number) => value !== id);
+  }
+}
 const title = computed(
-  () => nav.value.find((n) => n.key === page.value)?.label || "Overview",
+  () => nav.value.find((n) => n.key === page.value)?.label || t("page.dashboard"),
 );
 const modalTitle = computed(
   () =>
     (
       ({
-        branch: "Tambah cabang",
-        policy: "Maintenance policy kategori",
-        asset: "Register asset",
-        assign: "Assign custodian",
-        request: "Transfer / disposal request",
-        maintenance: "Schedule maintenance",
-        location: "Tambah lokasi",
-        category: "Tambah kategori",
-        user: "Tambah user",
-        decision: form.value.approve ? "Approve request" : "Reject request",
-        complete: "Complete maintenance",
-        return: "Return asset",
-        start: "Start maintenance",
-        cancel: "Cancel maintenance",
-        stocktake: "Open stocktake",
-        observe: "Observe asset tag",
-        closeStocktake: "Close stocktake",
-        stocktakeItems: "Stocktake snapshot",
-        password: "Change password",
-        access: "Edit user access",
+        branch: copy("Tambah cabang", "Add branch"),
+        policy: copy("Kebijakan kategori", "Category policy"),
+        asset: t("asset.register"),
+        editAsset: t("asset.edit"),
+        assign: copy("Tetapkan penanggung jawab", "Assign custodian"),
+        request: copy("Permintaan transfer / pelepasan", "Transfer / disposal request"),
+        maintenance: copy("Jadwalkan pemeliharaan", "Schedule maintenance"),
+        location: copy("Tambah lokasi", "Add location"),
+        category: copy("Tambah kategori", "Add category"),
+        user: copy("Tambah pengguna", "Add user"),
+        decision: form.value.approve ? copy("Setujui permintaan", "Approve request") : copy("Tolak permintaan", "Reject request"),
+        complete: copy("Selesaikan pemeliharaan", "Complete maintenance"),
+        return: copy("Kembalikan aset", "Return asset"),
+        start: copy("Mulai pemeliharaan", "Start maintenance"),
+        cancel: copy("Batalkan pemeliharaan", "Cancel maintenance"),
+        stocktake: copy("Buka stock opname", "Open stocktake"),
+        observe: copy("Catat tag aset", "Observe asset tag"),
+        closeStocktake: copy("Tutup stock opname", "Close stocktake"),
+        stocktakeItems: copy("Snapshot stock opname", "Stocktake snapshot"),
+        password: copy("Ubah password", "Change password"),
+        access: copy("Ubah akses pengguna", "Edit user access"),
+        history: t("asset.history"),
       }) as Record<string, string>
     )[modal.value] || modal.value,
 );
@@ -166,7 +232,9 @@ async function load() {
   stats.value = {};
   total.value = 0;
   try {
-    if (view === "dashboard") {
+    if (view === "finance") {
+      return;
+    } else if (view === "dashboard") {
       const [summary, data] = await Promise.all([
         api("/dashboard?branch_id=" + selectedBranch),
         api("/assets?size=5&branch_id=" + selectedBranch),
@@ -183,6 +251,7 @@ async function load() {
             search: search.value,
             status: status.value,
             branch_id: String(selectedBranch),
+            archived: String(showArchived.value),
           }),
       );
       if (generation !== loadGeneration) return;
@@ -197,7 +266,10 @@ async function load() {
           "&size=25&branch_id=" +
           selectedBranch +
           "&event=" +
-          activityEvent.value,
+          activityEvent.value +
+          ((["users", "branches", "locations", "categories"].includes(view) && showArchived.value)
+            ? "&archived=true"
+            : ""),
       );
       if (generation !== loadGeneration) return;
       records.value = data;
@@ -210,17 +282,28 @@ async function load() {
 }
 async function masters() {
   [locations.value, categories.value, branches.value] = await Promise.all([
-    api("/locations"),
-    api("/categories"),
+    api("/locations?branch_id=" + branch.value),
+    api("/categories?branch_id=" + branch.value),
     api("/branches"),
   ]);
+}
+async function loadAssignableRoles() {
+  if (!can("users.manage")) {
+    roleOptions.value = [];
+    return;
+  }
+  roleOptions.value = await api<RoleOption[]>("/user-roles");
 }
 async function signIn() {
   saving.value = true;
   error.value = "";
   try {
-    me.value = await api("/login", login);
+    const signedIn = await api<User>("/login", login);
+    me.value = signedIn;
+    branch.value = signedIn.active_branch_id;
     login.password = "";
+    showArchived.value = false;
+    await loadAssignableRoles();
     await masters();
     await load();
   } catch (e) {
@@ -236,6 +319,8 @@ async function logout() {
     loading.value = false;
     me.value = null;
     branch.value = 0;
+    showArchived.value = false;
+    roleOptions.value = [];
     assets.value = [];
     records.value = [];
   } catch (e) {
@@ -252,6 +337,7 @@ function expired() {
 async function navigate(key: string) {
   page.value = key;
   current.value = 1;
+  showArchived.value = false;
   await load();
 }
 async function turn(delta: number) {
@@ -262,33 +348,58 @@ async function filter() {
   current.value = 1;
   await load();
 }
+async function changeBranch() {
+  current.value = 1;
+  await masters();
+  await load();
+}
 function open(kind: string, a: Asset | null = null) {
   error.value = "";
   selected.value = a;
   modal.value = kind;
   form.value = {};
   const today = new Date().toLocaleDateString("en-CA");
-  if (kind === "asset")
+  if (kind === "asset" || kind === "editAsset")
     form.value = {
       tag: "",
       name: "",
       serial_number: "",
-      asset_branch_id: branch.value || branches.value[0]?.id,
-      category_id: categories.value[0]?.id,
-      location_id: locations.value.find(
+      asset_branch_id: a?.branch_id || branch.value || branches.value[0]?.id,
+      category_id: a?.category_id || categories.value[0]?.id,
+      location_id: a?.location_id || locations.value.find(
         (l) => l.branch_id === (branch.value || branches.value[0]?.id),
       )?.id,
       purchase_date: today,
       purchase_cost: 0,
       salvage_value: 0,
       useful_life_months: 48,
+      depreciation_method: "straight_line",
+      depreciation_start_date: today,
+      supplier_name: "",
+      acquisition_reference: "",
       warranty_until: "",
+      ...(a ? {
+        tag: a.tag,
+        name: a.name,
+        serial_number: a.serial_number,
+        purchase_date: a.purchase_date,
+        depreciation_method: a.depreciation_method,
+        depreciation_start_date: a.depreciation_start_date,
+        supplier_name: a.supplier_name,
+        acquisition_reference: a.acquisition_reference,
+        purchase_cost: a.purchase_cost,
+        salvage_value: a.salvage_value,
+        useful_life_months: a.useful_life_months,
+        warranty_until: a.warranty_until || "",
+        version: a.version,
+      } : {}),
     };
   if (kind === "request")
     form.value = {
       asset_id: a?.id,
       version: a?.version,
       kind: "transfer",
+      disposal_proceeds: 0,
       target_location_id: locations.value.find((l) => l.id !== a?.location_id)
         ?.id,
       reason: "",
@@ -309,6 +420,7 @@ function open(kind: string, a: Asset | null = null) {
       useful_life_months: 48,
       maintenance_interval_days: 0,
       maintenance_instructions: "",
+      branch_id: branch.value,
     };
   if (kind === "stocktake")
     form.value = { title: "", location_id: locations.value[0]?.id };
@@ -317,10 +429,24 @@ function open(kind: string, a: Asset | null = null) {
       name: "",
       email: "",
       password: "",
-      role: "operator",
+      role: roleOptions.value.find((role) => role.id === "operator")?.id || roleOptions.value[0]?.id || "operator",
       all_branches: false,
       branch_ids: branch.value ? [branch.value] : [],
     };
+  if (kind === "user" || kind === "access") {
+    void loadAssignableRoles().catch((e) => (error.value = (e as Error).message));
+  }
+}
+async function viewAssetHistory(a: Asset) {
+  selected.value = a;
+  historyRecords.value = [];
+  modal.value = "history";
+  error.value = "";
+  try {
+    historyRecords.value = await api(`/assets/${a.id}/history?branch_id=${branch.value}&size=100`);
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
 }
 async function submit() {
   saving.value = true;
@@ -337,6 +463,7 @@ async function submit() {
         body = {
           maintenance_interval_days: body.maintenance_interval_days,
           maintenance_instructions: body.maintenance_instructions,
+          depreciation_method: body.depreciation_method || "",
           version: body.version,
           apply_to_existing: !!body.apply_to_existing,
         };
@@ -369,7 +496,8 @@ async function submit() {
         };
         break;
       case "asset":
-        endpoint = "/assets";
+      case "editAsset":
+        endpoint = modal.value === "editAsset" ? `/assets/${selected.value!.id}` : "/assets";
         delete body.asset_branch_id;
         body.warranty_until = body.warranty_until || null;
         break;
@@ -393,6 +521,7 @@ async function submit() {
       case "request":
         endpoint = "/requests";
         if (body.kind === "dispose") body.target_location_id = null;
+        else body.disposal_proceeds = 0;
         break;
       case "maintenance":
         endpoint = "/maintenance";
@@ -429,11 +558,11 @@ async function submit() {
     if (modal.value === "password") {
       me.value = null;
       modal.value = "";
-      notify("Password diperbarui. Silakan login kembali.");
+      notify(copy("Password diperbarui. Silakan masuk kembali.", "Password updated. Please sign in again."));
       return;
     }
     modal.value = "";
-    notify("Perubahan berhasil disimpan");
+    notify(copy("Perubahan berhasil disimpan", "Changes saved successfully"));
     await masters();
     await load();
   } catch (e) {
@@ -501,18 +630,105 @@ async function exportCSV() {
     link.download = "assets-current-page.csv";
     link.click();
     URL.revokeObjectURL(url);
-    notify("Export CSV berhasil dan diaudit");
+    notify(copy("Ekspor CSV berhasil dan tercatat di audit", "CSV export completed and audited"));
   } catch (e) {
     error.value = (e as Error).message;
   } finally {
     saving.value = false;
   }
 }
+async function archiveAsset(a: Asset) {
+  if (!window.confirm(copy(`Arsipkan aset ${a.tag}? Data tetap tersimpan dan bisa dipulihkan.`, `Archive asset ${a.tag}? Its data will be retained and can be restored.`))) return;
+  try {
+    await api(`/assets/${a.id}`, undefined, "DELETE");
+    notify(copy("Aset diarsipkan", "Asset archived"));
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function restoreAsset(a: Asset) {
+  try {
+    await api(`/assets/${a.id}/restore`, {});
+    notify(copy("Aset dipulihkan", "Asset restored"));
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function archiveUser(r: any) {
+  if (!window.confirm(copy(`Arsipkan akun ${r.name}? Sesi aktifnya akan dicabut.`, `Archive ${r.name}'s account? Their active sessions will be revoked.`))) return;
+  try {
+    await api(`/users/${r.id}`, undefined, "DELETE");
+    notify(copy("Akun diarsipkan", "Account archived"));
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function restoreUser(r: any) {
+  try {
+    await api(`/users/${r.id}/restore`, {});
+    notify(copy("Akun dipulihkan", "Account restored"));
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function archiveBranch(r: any) {
+  if (!window.confirm(copy(`Arsipkan cabang ${r.code}? Cabang pusat tidak bisa diarsipkan.`, `Archive branch ${r.code}? Head office cannot be archived.`))) return;
+  try {
+    await api(`/branches/${r.id}`, undefined, "DELETE");
+    notify(copy("Cabang diarsipkan", "Branch archived"));
+    await masters();
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function restoreBranch(r: any) {
+  try {
+    await api(`/branches/${r.id}/restore`, {});
+    notify(copy("Cabang dipulihkan", "Branch restored"));
+    await masters();
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function archiveMaster(kind: "locations" | "categories", r: any) {
+  const label = kind === "locations" ? copy("lokasi", "location") : copy("kategori", "category");
+  if (!window.confirm(copy(`Arsipkan ${label} ${r.name}? Data tetap tersimpan.`, `Archive ${label} ${r.name}? Its data will be retained.`))) return;
+  try {
+    await api(`/${kind}/${r.id}`, undefined, "DELETE");
+    notify(copy(`${label} diarsipkan`, `${label[0].toUpperCase()}${label.slice(1)} archived`));
+    await masters();
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
+async function restoreMaster(kind: "locations" | "categories", r: any) {
+  try {
+    await api(`/${kind}/${r.id}/restore`, {});
+    notify(copy("Data dipulihkan", "Record restored"));
+    await masters();
+    await load();
+  } catch (e) {
+    error.value = (e as Error).message;
+  }
+}
 onMounted(async () => {
   window.addEventListener("session-expired", expired);
   try {
-    me.value = await api("/me");
+    const options = await api<{ organizations: LoginOrganization[] }>("/login/options");
+    loginOrganizations.value = options.organizations;
+    if (loginOrganizations.value.length) login.org_id = loginOrganizations.value[0].id;
+    const sessionUser = await api<User>("/me");
+    me.value = sessionUser;
+    branch.value = sessionUser.active_branch_id;
     await masters();
+    await loadAssignableRoles();
     await load();
   } catch {
     me.value = null;
@@ -527,47 +743,65 @@ onUnmounted(() => {
 });
 </script>
 <template>
-  <div v-if="initializing" class="boot">Loading AssetFlow…</div>
+  <div v-if="initializing" class="boot">{{ copy("Memuat AssetFlow…", "Loading AssetFlow…") }}</div>
   <div v-else-if="!me" class="login-wrap">
+    <div class="appearance-tools login-preferences">
+      <label :aria-label="t('common.language')"><Languages :size="16" /><select v-model="locale"><option value="id">Bahasa Indonesia</option><option value="en">English</option></select></label>
+      <button class="icon" @click="toggleTheme" :aria-label="t('common.theme')"><Sun v-if="theme === 'dark'" :size="17" /><Moon v-else :size="17" /></button>
+    </div>
     <section class="login-story">
       <div class="brand">
         <PackageCheck :size="30" /> AssetFlow<span class="edition"
-          >WORKSPACE</span
+          >{{ copy("RUANG KERJA", "WORKSPACE") }}</span
         >
       </div>
       <div>
-        <span class="eyebrow">CONTROL EVERY ASSET</span>
-        <h1>Your assets.<br />Your accountability.</h1>
+        <span class="eyebrow">{{ copy("KENDALIKAN SETIAP ASET", "CONTROL EVERY ASSET") }}</span>
+        <h1>{{ copy("Aset Anda.", "Your assets.") }}<br />{{ copy("Tanggung jawab Anda.", "Your accountability.") }}</h1>
         <p>
-          Satu tempat untuk inventaris, penanggung jawab, maintenance, dan
-          seluruh riwayat aset organisasi.
+          {{ copy("Satu tempat untuk inventaris, penanggung jawab, pemeliharaan, dan seluruh riwayat aset organisasi.", "One place for inventory, custodians, maintenance, and the complete history of organizational assets.") }}
         </p>
         <div class="story-line">
-          01 / Visibility &nbsp; 02 / Governance &nbsp; 03 / Lifecycle
+          {{ copy("01 / Visibilitas &nbsp; 02 / Tata kelola &nbsp; 03 / Siklus hidup", "01 / Visibility &nbsp; 02 / Governance &nbsp; 03 / Lifecycle") }}
         </div>
       </div>
-      <small>Asset management · Go + Vue</small>
+      <small>{{ copy("Manajemen aset · Go + Vue", "Asset management · Go + Vue") }}</small>
     </section>
     <section class="login-form">
       <div class="login-box">
-        <span class="eyebrow">WELCOME BACK</span>
-        <h2>Masuk ke workspace</h2>
-        <p>Gunakan akun organisasi Anda.</p>
+        <span class="eyebrow">{{ t("login.welcome") }}</span>
+        <h2>{{ t("login.title") }}</h2>
+        <p>{{ t("login.description") }}</p>
         <form @submit.prevent="signIn">
           <label
-            >Organization ID<input
-              v-model.number="login.org_id"
-              type="number"
-              min="1"
-              required /></label
+            >{{ t("login.organization") }}<select v-model.number="login.org_id" required>
+              <option
+                v-for="organization in loginOrganizations"
+                :key="organization.id"
+                :value="organization.id"
+              >
+                {{ organization.name }}
+              </option>
+            </select></label
           ><label
-            >Email<input
+            >{{ t("login.branch") }}<select v-model.number="login.branch_id" required>
+              <option :value="0">{{ t("common.allBranches") }}</option>
+              <option
+                v-for="item in loginOrganizations.find((o) => o.id === login.org_id)?.branches || []"
+                :key="item.id"
+                :value="item.id"
+              >
+                {{ item.code }} · {{ item.name }}
+              </option>
+            </select></label
+          ><label
+            >{{ t("login.email") }}<input
               v-model="login.email"
               type="email"
               autocomplete="username"
               required /></label
           ><label
-            >Password<input
+            >{{ t("login.password") }}<input
               v-model="login.password"
               type="password"
               autocomplete="current-password"
@@ -576,11 +810,10 @@ onUnmounted(() => {
           /></label>
           <div v-if="error" class="alert" role="alert">{{ error }}</div>
           <button class="primary" :disabled="saving">
-            {{ saving ? "Memproses…" : "Masuk workspace" }}
+            {{ saving ? t("login.processing") : t("login.submit") }}
             <ArrowUpRight :size="17" />
           </button>
         </form>
-        <small>Akun pertama dibuat melalui perintah bootstrap.</small>
       </div>
     </section>
   </div>
@@ -590,11 +823,11 @@ onUnmounted(() => {
       <div class="org">
         <span class="org-icon">AF</span>
         <div>
-          <b>Organization {{ me.org_id }}</b
-          ><small>Asset workspace</small>
+          <b>{{ me.organization_name }}</b
+          ><small>{{ me.all_branches ? copy("Pusat · semua cabang", "Head office · all branches") : copy("Ruang kerja cabang", "Branch workspace") }}</small>
         </div>
       </div>
-      <span class="nav-label">WORKSPACE</span>
+      <span class="nav-label">{{ copy("RUANG KERJA", "WORKSPACE") }}</span>
       <nav>
         <button
           v-for="n in nav"
@@ -611,27 +844,31 @@ onUnmounted(() => {
         </button>
       </nav>
       <div class="aside-bottom">
-        <span class="live-dot"></span> Connected workspace<small
-          >Governance built into every move.</small
+        <span class="live-dot"></span> {{ copy("Workspace terhubung", "Connected workspace") }}<small
+          >{{ copy("Tata kelola di setiap perubahan.", "Governance built into every move.") }}</small
         >
       </div>
     </aside>
     <div class="main">
       <header>
-        <div class="breadcrumb">Workspace <span>/</span> {{ title }}</div>
+        <div class="breadcrumb">{{ copy("Ruang kerja", "Workspace") }} <span>/</span> {{ title }}</div>
         <div class="user">
+          <div class="appearance-tools">
+            <label :aria-label="t('common.language')"><Languages :size="16" /><select v-model="locale"><option value="id">ID</option><option value="en">EN</option></select></label>
+            <button class="icon" @click="toggleTheme" :aria-label="t('common.theme')"><Sun v-if="theme === 'dark'" :size="17" /><Moon v-else :size="17" /></button>
+          </div>
           <span class="avatar">{{ me.name.slice(0, 1) }}</span>
           <div>
             <b>{{ me.name }}</b
-            ><small>{{ me.role }}</small>
+            ><small>{{ roleLabel(me.role) }}</small>
           </div>
           <button
             class="icon"
             @click="open('password')"
-            aria-label="Change password"
+                :aria-label="locale === 'id' ? 'Ubah password' : 'Change password'"
           >
             <KeyRound :size="18" /></button
-          ><button class="icon" @click="logout" aria-label="Logout">
+          ><button class="icon" @click="logout" :aria-label="locale === 'id' ? 'Keluar' : 'Logout'">
             <LogOut :size="18" />
           </button>
         </div>
@@ -639,106 +876,114 @@ onUnmounted(() => {
       <main>
         <div class="page-heading">
           <div>
-            <span class="eyebrow">ASSET OPERATIONS</span>
+              <span class="eyebrow">{{ locale === "id" ? "OPERASIONAL ASET" : "ASSET OPERATIONS" }}</span>
             <h1>{{ title }}</h1>
             <p>
               {{
                 page === "dashboard"
-                  ? "A clear view of your assets, responsibilities, and next actions."
-                  : "Kelola data dan proses aset dengan riwayat yang dapat ditelusuri."
+                  ? t("dashboard.description")
+                  : locale === "id" ? "Kelola data dan proses aset dengan riwayat yang dapat ditelusuri." : "Manage asset records and workflows with a traceable history."
               }}
             </p>
           </div>
           <div class="buttons">
             <select
+              v-if="me.all_branches || me.branch_ids.length > 1"
               class="branch-filter"
               v-model.number="branch"
-              @change="filter"
-              aria-label="Filter cabang"
+              @change="changeBranch"
+              :aria-label="copy('Filter cabang', 'Branch filter')"
             >
-              <option :value="0">Semua cabang yang diizinkan</option>
+              <option v-if="me.all_branches" :value="0">{{ t("common.allBranches") }}</option>
               <option v-for="b in branches" :key="b.id" :value="b.id">
                 {{ b.code }} · {{ b.name }}
               </option>
             </select>
             <button class="secondary" @click="load" :disabled="loading">
-              <RefreshCw :size="16" /> Refresh</button
+              <RefreshCw :size="16" /> {{ t("common.refresh") }}</button
             ><button
-              v-if="page === 'branches' && me.role === 'admin'"
+              v-if="page === 'branches' && can('branches.manage')"
               class="primary"
               @click="open('branch')"
             >
-              <Plus :size="17" /> Cabang</button
+              <Plus :size="17" /> {{ t("common.branch") }}</button
             ><button
               v-if="page === 'assets' && canWrite"
               class="primary"
               @click="open('asset')"
             >
-              <Plus :size="17" /> Register asset</button
+              <Plus :size="17" /> {{ t("asset.register") }}</button
             ><button
-              v-if="page === 'locations' && canManage"
+              v-if="page === 'locations' && can('locations.manage')"
               class="primary"
               @click="open('location')"
             >
-              <Plus :size="17" /> Lokasi</button
+              <Plus :size="17" /> {{ copy("Lokasi", "Location") }}</button
             ><button
-              v-if="page === 'categories' && canManage"
+              v-if="page === 'categories' && can('categories.manage')"
               class="primary"
               @click="open('category')"
             >
-              <Plus :size="17" /> Kategori</button
+              <Plus :size="17" /> {{ copy("Kategori", "Category") }}</button
             ><button
-              v-if="page === 'stocktakes' && canWrite"
+              v-if="page === 'stocktakes' && can('stocktakes.manage')"
               class="primary"
               @click="open('stocktake')"
             >
-              <Plus :size="17" /> Stocktake</button
+              <Plus :size="17" /> {{ copy("Stock opname", "Stocktake") }}</button
             ><button
-              v-if="page === 'users' && me.role === 'admin'"
+              v-if="page === 'users' && can('users.manage')"
               class="primary"
               @click="open('user')"
             >
-              <Plus :size="17" /> User
+              <Plus :size="17" /> {{ copy("Pengguna", "User") }}
+            </button>
+            <button
+              v-if="(page === 'assets' && can('assets.archive')) || (page === 'users' && can('users.archive')) || (page === 'branches' && can('branches.manage')) || (page === 'locations' && can('locations.archive')) || (page === 'categories' && can('categories.archive'))"
+              class="secondary"
+              @click="showArchived = !showArchived; filter()"
+              :aria-pressed="showArchived"
+            >
+              <ArchiveRestore :size="16" />
+              {{ showArchived ? t("common.activeData") : t("common.archive") }}
             </button>
           </div>
         </div>
         <div v-if="error && !modal" class="alert" role="alert">{{ error }}</div>
         <div v-if="loading" class="loading" aria-live="polite">
-          Memuat data…
+          {{ t("common.loading") }}
         </div>
         <template v-if="page === 'dashboard'"
           ><div class="hint due-callout">
-            {{ stats.maintenance_due_assets || 0 }} aset telah jatuh tempo
-            maintenance berdasarkan policy kategori. Buka register aset untuk
-            menjadwalkan pekerjaan.
+              {{ stats.maintenance_due_assets || 0 }} {{ locale === "id" ? "aset telah jatuh tempo pemeliharaan berdasarkan kebijakan kategori." : "assets are past their category maintenance interval." }}
           </div>
           <div class="kpis">
             <article class="kpi featured">
-              <span>Total registered assets <Boxes :size="20" /></span
+              <span>{{ t("dashboard.total") }} <Boxes :size="20" /></span
               ><strong>{{ stats.total || 0 }}</strong
-              ><small>Across all locations</small>
+              ><small>{{ locale === "id" ? "Di seluruh lokasi" : "Across all locations" }}</small>
             </article>
             <article class="kpi">
-              <span>Available <PackageCheck :size="20" /></span
+              <span>{{ t("dashboard.available") }} <PackageCheck :size="20" /></span
               ><strong>{{ stats.available || 0 }}</strong
-              ><small>Ready to be assigned</small>
+              ><small>{{ locale === "id" ? "Siap ditugaskan" : "Ready to be assigned" }}</small>
             </article>
             <article class="kpi">
-              <span>Assigned <Users :size="20" /></span
+              <span>{{ t("dashboard.assigned") }} <Users :size="20" /></span
               ><strong>{{ stats.assigned || 0 }}</strong
-              ><small>With a custodian</small>
+              ><small>{{ locale === "id" ? "Memiliki penanggung jawab" : "With a custodian" }}</small>
             </article>
             <article class="kpi">
-              <span>Under maintenance <Wrench :size="20" /></span
+              <span>{{ t("dashboard.maintenance") }} <Wrench :size="20" /></span
               ><strong>{{ stats.maintenance || 0 }}</strong
-              ><small>In progress</small>
+              ><small>{{ t("status.in_progress") }}</small>
             </article>
           </div>
           <div class="overview-grid">
-            <section class="panel value-panel">
-              <span class="eyebrow">PORTFOLIO VALUE</span>
+            <section v-if="can('assets.finance')" class="panel value-panel">
+              <span class="eyebrow">{{ t("dashboard.portfolio") }}</span>
               <h2>{{ money(stats.purchase_value) }}</h2>
-              <p>Total acquisition cost of non-disposed assets.</p>
+              <p>{{ locale === "id" ? "Total nilai perolehan aset yang belum dilepas." : "Total acquisition cost of non-disposed assets." }}</p>
               <div class="bar">
                 <div
                   :style="{
@@ -749,23 +994,23 @@ onUnmounted(() => {
                 ></div>
               </div>
               <div class="legend">
-                <span><i></i> Assigned {{ stats.assigned || 0 }}</span
-                ><span>Disposed {{ stats.disposed || 0 }}</span>
+                <span><i></i> {{ copy("Digunakan", "Assigned") }} {{ stats.assigned || 0 }}</span
+                ><span>{{ copy("Dilepas", "Disposed") }} {{ stats.disposed || 0 }}</span>
               </div>
             </section>
             <section class="panel attention">
-              <span class="eyebrow">REQUIRES ATTENTION</span
+              <span class="eyebrow">{{ t("dashboard.attention") }}</span
               ><button @click="navigate('requests')">
                 <div>
-                  <b>Pending approvals</b
-                  ><small>Transfer & disposal requests</small>
+                  <b>{{ t("dashboard.pending") }}</b
+                  ><small>{{ locale === "id" ? "Permintaan transfer dan pelepasan" : "Transfer and disposal requests" }}</small>
                 </div>
                 <strong>{{ stats.pending_requests || 0 }}</strong
                 ><ArrowUpRight :size="18" /></button
               ><button @click="navigate('maintenance')">
                 <div>
-                  <b>Overdue maintenance</b
-                  ><small>Open jobs past their due date</small>
+                  <b>{{ t("dashboard.overdue") }}</b
+                  ><small>{{ locale === "id" ? "Pekerjaan melewati tanggal jatuh tempo" : "Open jobs past their due date" }}</small>
                 </div>
                 <strong class="amber">{{
                   stats.overdue_maintenance || 0
@@ -776,20 +1021,20 @@ onUnmounted(() => {
           </div>
           <section class="panel">
             <div class="panel-heading">
-              <h3>Recently registered</h3>
+              <h3>{{ t("dashboard.recent") }}</h3>
               <button class="text-btn" @click="navigate('assets')">
-                View register <ArrowUpRight :size="16" />
+                {{ t("dashboard.viewRegister") }} <ArrowUpRight :size="16" />
               </button>
             </div>
             <div class="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Asset</th>
-                    <th>Category</th>
-                    <th>Location</th>
-                    <th>Status</th>
-                    <th>Acquisition cost</th>
+                    <th>{{ copy("Aset", "Asset") }}</th>
+                    <th>{{ t("asset.category") }}</th>
+                    <th>{{ t("common.location") }}</th>
+                    <th>{{ t("common.status") }}</th>
+                    <th v-if="can('assets.finance')">{{ copy("Harga perolehan", "Acquisition cost") }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -802,14 +1047,14 @@ onUnmounted(() => {
                     <td>{{ a.location_name }}</td>
                     <td>
                       <span class="badge" :class="a.status">{{
-                        a.status
+                        t("status." + a.status)
                       }}</span>
                     </td>
-                    <td>{{ money(a.purchase_cost) }}</td>
+                    <td v-if="can('assets.finance')">{{ money(a.purchase_cost) }}</td>
                   </tr>
                   <tr v-if="!assets.length">
                     <td colspan="5" class="empty">
-                      Belum ada aset. Mulai dengan registrasi aset pertama.
+                      {{ t("dashboard.empty") }}
                     </td>
                   </tr>
                 </tbody>
@@ -823,12 +1068,12 @@ onUnmounted(() => {
               <div class="search">
                 <Search :size="18" /><input
                   v-model="search"
-                  placeholder="Cari nama, tag, atau serial…"
+                  :placeholder="copy('Cari nama, tag, atau nomor seri…', 'Search name, tag, or serial…')"
                   maxlength="200"
                 />
               </div>
               <select v-model="status" @change="filter">
-                <option value="">All statuses</option>
+                  <option value="">{{ copy("Semua status", "All statuses") }}</option>
                 <option
                   v-for="s in [
                     'available',
@@ -838,27 +1083,27 @@ onUnmounted(() => {
                   ]"
                   :key="s"
                 >
-                  {{ s }}
+                  {{ t("status." + s) }}
                 </option></select
-              ><button class="secondary">Cari</button
+              ><button class="secondary">{{ t("common.search") }}</button
               ><button
                 type="button"
                 class="secondary"
                 @click="exportCSV"
                 :disabled="!assets.length"
               >
-                Export halaman CSV
+                {{ copy("Ekspor halaman CSV", "Export page CSV") }}
               </button>
             </form>
             <div class="table-scroll">
               <table>
                 <thead>
                   <tr>
-                    <th>Asset / Tag</th>
-                    <th>Location & custodian</th>
-                    <th>Status</th>
-                    <th>Cost / book value</th>
-                    <th>Actions</th>
+                    <th>{{ copy("Aset / Tag", "Asset / Tag") }}</th>
+                    <th>{{ copy("Lokasi & penanggung jawab", "Location & custodian") }}</th>
+                    <th>{{ t("common.status") }}</th>
+                    <th>{{ copy("Harga / nilai buku", "Cost / book value") }}</th>
+                    <th>{{ t("common.actions") }}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -866,75 +1111,90 @@ onUnmounted(() => {
                     <td>
                       <b>{{ a.name }}</b
                       ><small>{{ a.tag }} · {{ a.category_name }}</small
-                      ><small>SN: {{ a.serial_number || "—" }}</small>
+                      ><small>{{ copy("No. seri", "Serial") }}: {{ a.serial_number || "—" }}</small>
                     </td>
                     <td>
                       {{ a.location_name }}<small>{{ a.branch_name }}</small
-                      ><small>{{ a.custodian || "Unassigned" }}</small>
+                      ><small>{{ a.custodian || (locale === "id" ? "Belum ditugaskan" : "Unassigned") }}</small>
                     </td>
                     <td>
                       <span class="badge" :class="a.status">{{
-                        a.status
+                        t("status." + a.status)
                       }}</span>
                     </td>
                     <td>
-                      {{ money(a.purchase_cost)
-                      }}<small>{{ money(a.book_value) }} estimasi buku</small
-                      ><small v-if="a.next_maintenance_date"
-                        >Maintenance: {{ date(a.next_maintenance_date) }}</small
+                      <template v-if="can('assets.finance')">{{ money(a.purchase_cost)
+                      }}<small>{{ money(a.book_value) }} {{ t("asset.bookValue") }}</small
+                      ></template><small v-if="a.next_maintenance_date"
+                        >{{ copy("Pemeliharaan", "Maintenance") }}: {{ date(a.next_maintenance_date) }}</small
                       >
                     </td>
                     <td>
-                      <div class="row-actions" v-if="canWrite">
-                        <template v-if="a.status === 'available'"
-                          ><button @click="open('assign', a)">Assign</button
-                          ><button @click="open('request', a)">
-                            Transfer / disposal</button
-                          ><button @click="open('maintenance', a)">
-                            Maintenance
-                          </button></template
-                        ><button
-                          v-if="a.status === 'assigned'"
-                          @click="open('return', a)"
-                        >
-                          Return</button
-                        ><span
-                          v-if="['disposed', 'maintenance'].includes(a.status)"
-                          >—</span
-                        >
+                      <div class="row-actions">
+                        <template v-if="!a.deleted_at">
+                          <button v-if="can('assets.history')" class="icon" @click="viewAssetHistory(a)" :aria-label="t('asset.history')" :title="t('asset.history')"><Clock3 :size="15" /></button>
+                          <button
+                            v-if="can('assets.write')"
+                            @click="open('editAsset', a)"
+                          ><Pencil :size="14" /> {{ copy("Ubah", "Edit") }}</button>
+                          <button
+                            v-if="a.status === 'available' && can('assets.operate')"
+                            @click="open('assign', a)"
+                          >{{ copy("Tetapkan", "Assign") }}</button>
+                          <button
+                            v-if="a.status === 'available' && can('requests.create')"
+                            @click="open('request', a)"
+                          >{{ copy("Transfer / pelepasan", "Transfer / disposal") }}</button>
+                          <button
+                            v-if="a.status === 'available' && can('maintenance.manage')"
+                            @click="open('maintenance', a)"
+                          >{{ t("nav.maintenance") }}</button>
+                          <button
+                            v-if="a.status === 'assigned' && can('assets.operate')"
+                            @click="open('return', a)"
+                          >{{ copy("Kembalikan", "Return") }}</button>
+                          <button
+                            v-if="can('assets.archive')"
+                            @click="archiveAsset(a)"
+                          ><Archive :size="14" /> {{ copy("Arsipkan", "Archive") }}</button>
+                        </template>
+                        <button
+                          v-else-if="can('assets.archive')"
+                          @click="restoreAsset(a)"
+                        ><ArchiveRestore :size="14" /> {{ copy("Pulihkan", "Restore") }}</button>
                       </div>
-                      <span v-else>Read only</span>
                     </td>
                   </tr>
                   <tr v-if="!assets.length">
                     <td colspan="5" class="empty">
-                      Tidak ada aset sesuai filter.
+                      {{ copy("Tidak ada aset yang sesuai dengan filter.", "No assets match these filters.") }}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
             <div class="pagination">
-              <span>{{ total }} assets · Halaman {{ current }}</span>
+              <span>{{ total }} {{ copy("aset · Halaman", "assets · Page") }} {{ current }}</span>
               <div>
                 <button
                   class="icon"
                   @click="turn(-1)"
                   :disabled="current === 1 || loading"
-                  aria-label="Previous page"
+                  :aria-label="copy('Halaman sebelumnya', 'Previous page')"
                 >
                   <ChevronLeft :size="18" /></button
                 ><button
                   class="icon"
                   @click="turn(1)"
                   :disabled="current * 25 >= total || loading"
-                  aria-label="Next page"
+                  :aria-label="copy('Halaman berikutnya', 'Next page')"
                 >
                   <ChevronRight :size="18" />
                 </button>
               </div>
             </div></section
         ></template>
+        <FinanceWorkspace v-else-if="page === 'finance'" :branch-id="branch" :user-id="me.id" :finance="can('finance.read')" :can-manage="can('finance.manage')" :can-propose="can('valuation.propose')" :can-decide="can('valuation.decide')" :contracts-read="can('contracts.read')" :contracts-manage="can('contracts.manage')" :locale="locale" />
         <section v-else class="panel">
           <div v-if="page === 'activity'" class="filters">
             <select
@@ -942,7 +1202,7 @@ onUnmounted(() => {
               @change="filter"
               aria-label="Activity event"
             >
-              <option value="">All activity</option>
+              <option value="">{{ copy("Semua aktivitas", "All activity") }}</option>
               <option
                 v-for="event in [
                   'login_success',
@@ -963,11 +1223,11 @@ onUnmounted(() => {
             <table v-if="page === 'requests'">
               <thead>
                 <tr>
-                  <th>Asset</th>
-                  <th>Request</th>
-                  <th>Requester</th>
-                  <th>Status</th>
-                  <th>Decision</th>
+                  <th>{{ copy("Aset", "Asset") }}</th>
+                  <th>{{ copy("Permintaan", "Request") }}</th>
+                  <th>{{ copy("Pemohon", "Requester") }}</th>
+                  <th>{{ t("common.status") }}</th>
+                  <th>{{ copy("Keputusan", "Decision") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -977,8 +1237,8 @@ onUnmounted(() => {
                     ><small>{{ r.tag }}</small>
                   </td>
                   <td>
-                    {{ r.kind }}
-                    <small>{{ r.target_location || "Retire asset" }}</small
+                    {{ r.kind === "transfer" ? copy("Transfer", "Transfer") : copy("Pelepasan", "Disposal") }}
+                    <small>{{ r.target_location || copy("Lepas aset", "Retire asset") }}</small
                     ><small>{{ r.reason }}</small>
                   </td>
                   <td>
@@ -986,23 +1246,23 @@ onUnmounted(() => {
                     }}<small>{{ timestamp(r.created_at) }}</small>
                   </td>
                   <td>
-                    <span class="badge" :class="r.status">{{ r.status }}</span>
+                    <span class="badge" :class="r.status">{{ t("status." + r.status) }}</span>
                   </td>
                   <td>
                     <div
                       v-if="
                         r.status === 'pending' &&
-                        canManage &&
+                        can('requests.decide') &&
                         r.requested_by !== me.id
                       "
                       class="row-actions"
                     >
-                      <button @click="decision(r, true)">Approve</button
-                      ><button @click="decision(r, false)">Reject</button>
+                      <button @click="decision(r, true)">{{ copy("Setujui", "Approve") }}</button
+                      ><button @click="decision(r, false)">{{ copy("Tolak", "Reject") }}</button>
                     </div>
                     <small v-else>{{
                       r.status === "pending"
-                        ? "Menunggu checker lain"
+                        ? copy("Menunggu pemeriksa lain", "Awaiting another checker")
                         : r.decision_note || "—"
                     }}</small>
                   </td>
@@ -1012,11 +1272,11 @@ onUnmounted(() => {
             <table v-else-if="page === 'maintenance'">
               <thead>
                 <tr>
-                  <th>Job / Asset</th>
-                  <th>Due date</th>
-                  <th>Status</th>
-                  <th>Cost</th>
-                  <th>Actions</th>
+                  <th>{{ copy("Pekerjaan / Aset", "Job / Asset") }}</th>
+                  <th>{{ copy("Jatuh tempo", "Due date") }}</th>
+                  <th>{{ t("common.status") }}</th>
+                  <th v-if="can('assets.finance')">{{ copy("Biaya", "Cost") }}</th>
+                  <th>{{ t("common.actions") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1027,22 +1287,22 @@ onUnmounted(() => {
                   </td>
                   <td>{{ date(r.due_date) }}</td>
                   <td>
-                    <span class="badge" :class="r.status">{{ r.status }}</span>
+                    <span class="badge" :class="r.status">{{ t("status." + r.status) }}</span>
                   </td>
-                  <td>{{ money(r.cost) }}</td>
+                  <td v-if="can('assets.finance')">{{ r.cost == null ? "—" : money(r.cost) }}</td>
                   <td>
-                    <div class="row-actions" v-if="canWrite">
+                    <div class="row-actions" v-if="can('maintenance.manage')">
                       <template v-if="r.status === 'scheduled'"
                         ><button @click="maintenanceAction(r, 'start')">
-                          Start</button
+                          {{ copy("Mulai", "Start") }}</button
                         ><button @click="maintenanceAction(r, 'cancel')">
-                          Cancel
+                          {{ copy("Batalkan", "Cancel") }}
                         </button></template
                       ><button
                         v-if="r.status === 'in_progress'"
                         @click="maintenanceAction(r, 'complete')"
                       >
-                        Complete
+                        {{ copy("Selesaikan", "Complete") }}
                       </button>
                     </div>
                   </td>
@@ -1052,11 +1312,11 @@ onUnmounted(() => {
             <table v-else-if="page === 'stocktakes'">
               <thead>
                 <tr>
-                  <th>Stocktake</th>
-                  <th>Status</th>
-                  <th>Observed / expected</th>
-                  <th>Missing</th>
-                  <th>Actions</th>
+                  <th>{{ copy("Stock opname", "Stocktake") }}</th>
+                  <th>{{ t("common.status") }}</th>
+                  <th>{{ copy("Teramati / diharapkan", "Observed / expected") }}</th>
+                  <th>{{ copy("Belum ditemukan", "Missing") }}</th>
+                  <th>{{ t("common.actions") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1072,24 +1332,24 @@ onUnmounted(() => {
                   <td>{{ r.missing }}</td>
                   <td>
                     <div class="row-actions">
-                      <button @click="viewStocktake(r)">Snapshot</button
+                      <button @click="viewStocktake(r)">{{ copy("Snapshot", "Snapshot") }}</button
                       ><template v-if="r.status === 'open'"
                         ><button
-                          v-if="canWrite"
+                          v-if="can('stocktakes.observe')"
                           @click="
                             open('observe');
                             form = { id: r.id, tag: '', notes: '' };
                           "
                         >
-                          Observe tag</button
+                          {{ copy("Catat tag", "Observe tag") }}</button
                         ><button
-                          v-if="canManage"
+                          v-if="can('stocktakes.close')"
                           @click="
                             open('closeStocktake');
                             form = { id: r.id, acknowledge: false };
                           "
                         >
-                          Close
+                          {{ copy("Tutup", "Close") }}
                         </button></template
                       >
                     </div>
@@ -1100,10 +1360,10 @@ onUnmounted(() => {
             <table v-else-if="page === 'activity'">
               <thead>
                 <tr>
-                  <th>Time / user</th>
-                  <th>Event</th>
-                  <th>Request</th>
-                  <th>Status</th>
+                  <th>{{ copy("Waktu / pengguna", "Time / user") }}</th>
+                  <th>{{ copy("Peristiwa", "Event") }}</th>
+                  <th>{{ copy("Permintaan", "Request") }}</th>
+                  <th>{{ t("common.status") }}</th>
                   <th>Metadata</th>
                 </tr>
               </thead>
@@ -1112,7 +1372,7 @@ onUnmounted(() => {
                   <td>
                     {{ timestamp(r.created_at)
                     }}<small>{{
-                      r.actor_name || r.attempted_email || "Unauthenticated"
+                      r.actor_name || r.attempted_email || copy("Tidak terautentikasi", "Unauthenticated")
                     }}</small>
                   </td>
                   <td>{{ r.event }}</td>
@@ -1126,13 +1386,13 @@ onUnmounted(() => {
                   </td>
                   <td>
                     <details>
-                      <summary>Details</summary>
+                      <summary>{{ copy("Detail", "Details") }}</summary>
                       <small
                         >{{ r.request_id }}<br />Peer IP: {{ r.peer_ip
                         }}<br />{{ r.user_agent }}<br />{{
                           r.duration_ms
                         }}
-                        ms</small
+                        {{ copy("md", "ms") }}</small
                       >
                     </details>
                   </td>
@@ -1142,9 +1402,10 @@ onUnmounted(() => {
             <table v-else-if="page === 'branches'">
               <thead>
                 <tr>
-                  <th>Code</th>
-                  <th>Branch</th>
-                  <th>Address</th>
+                  <th>{{ copy("Kode", "Code") }}</th>
+                  <th>{{ t("common.branch") }}</th>
+                  <th>{{ copy("Alamat", "Address") }}</th>
+                  <th>{{ t("common.actions") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1152,16 +1413,28 @@ onUnmounted(() => {
                   <td>{{ r.code }}</td>
                   <td>{{ r.name }}</td>
                   <td>{{ r.address || "—" }}</td>
+                  <td>
+                    <button
+                      v-if="!showArchived && can('branches.manage') && r.code !== 'HQ'"
+                      class="text-btn"
+                      @click="archiveBranch(r)"
+                    ><Archive :size="14" /> Arsipkan</button>
+                    <button
+                      v-if="showArchived && can('branches.manage')"
+                      class="text-btn"
+                      @click="restoreBranch(r)"
+                    ><ArchiveRestore :size="14" /> Pulihkan</button>
+                  </td>
                 </tr>
               </tbody>
             </table>
             <table v-else-if="page === 'audit'">
               <thead>
                 <tr>
-                  <th>Time / Actor</th>
-                  <th>Action</th>
-                  <th>Entity</th>
-                  <th>Changes</th>
+                  <th>{{ copy("Waktu / pelaku", "Time / Actor") }}</th>
+                  <th>{{ copy("Tindakan", "Action") }}</th>
+                  <th>{{ copy("Objek", "Entity") }}</th>
+                  <th>{{ copy("Perubahan", "Changes") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1172,11 +1445,11 @@ onUnmounted(() => {
                   <td>{{ r.action }}</td>
                   <td>
                     {{ r.entity }} #{{ r.entity_id
-                    }}<small>Branch {{ r.branch_id || "Company" }}</small>
+                    }}<small>{{ copy("Cabang", "Branch") }} {{ r.branch_id || copy("Pusat", "Company") }}</small>
                   </td>
                   <td>
                     <details>
-                      <summary>View payload</summary>
+                      <summary>{{ copy("Lihat data", "View payload") }}</summary>
                       <small
                         >Request: {{ r.request_id }} · IP:
                         {{ r.peer_ip }}</small
@@ -1196,12 +1469,12 @@ onUnmounted(() => {
             <table v-else-if="page === 'users'">
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th>{{ copy("Nama", "Name") }}</th>
                   <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Branch scope</th>
-                  <th>Access</th>
+                  <th>{{ copy("Peran", "Role") }}</th>
+                  <th>{{ t("common.status") }}</th>
+                  <th>{{ copy("Cakupan cabang", "Branch scope") }}</th>
+                  <th>{{ copy("Akses", "Access") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1209,13 +1482,13 @@ onUnmounted(() => {
                   <td>{{ r.name }}</td>
                   <td>{{ r.email }}</td>
                   <td>
-                    <span class="badge">{{ r.role }}</span>
+                    <span class="badge">{{ roleLabel(r.role) }}</span>
                   </td>
-                  <td>{{ r.active ? "Active" : "Inactive" }}</td>
+                  <td>{{ r.deleted_at ? copy("Diarsipkan", "Archived") : (r.active ? copy("Aktif", "Active") : copy("Nonaktif", "Inactive")) }}</td>
                   <td>
                     {{
                       r.all_branches
-                        ? "Company-wide"
+                        ? copy("Seluruh organisasi", "Company-wide")
                         : (r.branch_ids || [])
                             .map(
                               (id: number) =>
@@ -1226,7 +1499,7 @@ onUnmounted(() => {
                   </td>
                   <td>
                     <button
-                      v-if="r.id !== me.id"
+                      v-if="!showArchived && r.id !== me.id && can('users.manage')"
                       class="text-btn"
                       @click="
                         open('access');
@@ -1239,8 +1512,18 @@ onUnmounted(() => {
                         };
                       "
                     >
-                      Edit access
+                      {{ copy("Ubah akses", "Edit access") }}
                     </button>
+                    <button
+                      v-if="!showArchived && r.id !== me.id && can('users.archive')"
+                      class="text-btn"
+                      @click="archiveUser(r)"
+                    ><Archive :size="14" /> Arsipkan</button>
+                    <button
+                      v-if="showArchived && can('users.archive')"
+                      class="text-btn"
+                      @click="restoreUser(r)"
+                    ><ArchiveRestore :size="14" /> Pulihkan</button>
                   </td>
                 </tr>
               </tbody>
@@ -1249,10 +1532,12 @@ onUnmounted(() => {
               <thead>
                 <tr>
                   <th>ID</th>
-                  <th>Name</th>
-                  <th v-if="page === 'locations'">Branch</th>
-                  <th v-if="page === 'categories'">Useful life</th>
-                  <th v-if="page === 'categories'">Maintenance policy</th>
+                  <th>{{ copy("Nama", "Name") }}</th>
+                  <th v-if="page === 'locations'">{{ t("common.branch") }}</th>
+                  <th v-if="page === 'categories'">{{ copy("Cakupan", "Scope") }}</th>
+                  <th v-if="page === 'categories'">{{ t("asset.life") }}</th>
+                  <th v-if="page === 'categories'">{{ copy("Kebijakan pemeliharaan", "Maintenance policy") }}</th>
+                  <th>{{ t("common.actions") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1263,16 +1548,19 @@ onUnmounted(() => {
                     {{ r.branch_code }} · {{ r.branch_name }}
                   </td>
                   <td v-if="page === 'categories'">
-                    {{ r.useful_life_months }} months
+                    {{ r.branch_name || t("common.allBranches") }}
+                  </td>
+                  <td v-if="page === 'categories'">
+                    {{ r.useful_life_months }} {{ copy("bulan", "months") }}
                   </td>
                   <td v-if="page === 'categories'">
                     {{
                       r.maintenance_interval_days
-                        ? `Every ${r.maintenance_interval_days} days`
-                        : "Manual only"
+                        ? copy(`Setiap ${r.maintenance_interval_days} hari`, `Every ${r.maintenance_interval_days} days`)
+                        : copy("Manual saja", "Manual only")
                     }}<small>{{ r.maintenance_instructions }}</small
                     ><button
-                      v-if="me.role === 'admin'"
+                      v-if="can('categories.manage') && (me?.role === 'admin' || r.branch_id === branch)"
                       class="text-btn"
                       @click="
                         open('policy');
@@ -1282,17 +1570,40 @@ onUnmounted(() => {
                           maintenance_interval_days:
                             r.maintenance_interval_days,
                           maintenance_instructions: r.maintenance_instructions,
+                          depreciation_method: r.depreciation_method,
                           apply_to_existing: false,
                         };
                       "
                     >
-                      Edit policy
+                      {{ copy("Ubah kebijakan", "Edit policy") }}
                     </button>
+                  </td>
+                  <td>
+                    <button
+                      v-if="!showArchived && page === 'locations' && can('locations.archive')"
+                      class="text-btn"
+                      @click="archiveMaster('locations', r)"
+                    ><Archive :size="14" /> {{ copy("Arsipkan", "Archive") }}</button>
+                    <button
+                      v-if="!showArchived && page === 'categories' && can('categories.archive') && (me?.role === 'admin' || r.branch_id === branch)"
+                      class="text-btn"
+                      @click="archiveMaster('categories', r)"
+                    ><Archive :size="14" /> {{ copy("Arsipkan", "Archive") }}</button>
+                    <button
+                      v-if="showArchived && page === 'locations' && can('locations.archive')"
+                      class="text-btn"
+                      @click="restoreMaster('locations', r)"
+                    ><ArchiveRestore :size="14" /> {{ copy("Pulihkan", "Restore") }}</button>
+                    <button
+                      v-if="showArchived && page === 'categories' && can('categories.archive') && (me?.role === 'admin' || r.branch_id === branch)"
+                      class="text-btn"
+                      @click="restoreMaster('categories', r)"
+                    ><ArchiveRestore :size="14" /> {{ copy("Pulihkan", "Restore") }}</button>
                   </td>
                 </tr>
               </tbody>
             </table>
-            <div v-if="!records.length" class="empty">Belum ada data.</div>
+            <div v-if="!records.length" class="empty">{{ copy("Belum ada data.", "No records yet.") }}</div>
           </div>
           <div
             v-if="
@@ -1306,20 +1617,20 @@ onUnmounted(() => {
             "
             class="pagination"
           >
-            <span>Halaman {{ current }} · Maksimal 25 baris</span>
+            <span>{{ copy("Halaman", "Page") }} {{ current }} · {{ copy("Maksimal 25 baris", "Up to 25 rows") }}</span>
             <div>
               <button
                 class="icon"
                 @click="turn(-1)"
                 :disabled="current === 1 || loading"
-                aria-label="Previous page"
+                :aria-label="copy('Halaman sebelumnya', 'Previous page')"
               >
                 <ChevronLeft :size="18" /></button
               ><button
                 class="icon"
                 @click="turn(1)"
                 :disabled="records.length < 25 || loading"
-                aria-label="Next page"
+                :aria-label="copy('Halaman berikutnya', 'Next page')"
               >
                 <ChevronRight :size="18" />
               </button>
@@ -1327,7 +1638,7 @@ onUnmounted(() => {
           </div>
         </section>
         <footer>
-          AssetFlow <span>Operational clarity. Accountable ownership.</span>
+          AssetFlow <span>{{ copy("Operasional yang jelas. Kepemilikan yang akuntabel.", "Operational clarity. Accountable ownership.") }}</span>
         </footer>
       </main>
     </div>
@@ -1351,7 +1662,7 @@ onUnmounted(() => {
           class="icon"
           @click="modal = ''"
           :disabled="saving"
-          aria-label="Close"
+          :aria-label="copy('Tutup', 'Close')"
         >
           <X :size="20" />
         </button>
@@ -1359,110 +1670,120 @@ onUnmounted(() => {
       <form @submit.prevent="submit">
         <template v-if="modal === 'branch'"
           ><label
-            >Code<input
+            >{{ copy("Kode", "Code") }}<input
               v-model="form.code"
               required
               maxlength="30"
               placeholder="JKT-01" /></label
           ><label
-            >Name<input
+            >{{ copy("Nama", "Name") }}<input
               v-model="form.name"
               required
               minlength="2"
               maxlength="150" /></label
           ><label
-            >Address<textarea
+            >{{ copy("Alamat", "Address") }}<textarea
               v-model="form.address"
               maxlength="1000"
             ></textarea></label></template
         ><template v-if="modal === 'location'"
           ><label
-            >Branch<select v-model.number="form.branch_id" required>
+            >{{ t("common.branch") }}<select v-model.number="form.branch_id" required>
               <option v-for="b in branches" :key="b.id" :value="b.id">
                 {{ b.code }} · {{ b.name }}
               </option>
             </select></label
           ></template
         ><template v-if="['category', 'policy'].includes(modal)"
+          ><label v-if="modal === 'category' && me?.role === 'admin'"
+            >{{ copy("Cakupan kategori", "Category scope") }}<select v-model.number="form.branch_id">
+              <option :value="0">{{ copy("Semua cabang", "All branches") }}</option>
+              <option v-for="b in branches" :key="b.id" :value="b.id">
+                {{ b.code }} · {{ b.name }}
+              </option>
+            </select></label
           ><label
-            >Maintenance interval (days)<input
+            >{{ copy("Interval pemeliharaan (hari)", "Maintenance interval (days)") }}<input
               v-model.number="form.maintenance_interval_days"
               type="number"
               min="0"
               max="3650"
               required /></label
           ><label
-            >Maintenance instructions<textarea
+            >{{ copy("Instruksi pemeliharaan", "Maintenance instructions") }}<textarea
               v-model="form.maintenance_instructions"
               maxlength="2000"
             ></textarea>
           </label>
+          <label v-if="modal === 'category' && can('assets.finance')"
+            >{{ t("asset.method") }}<select v-model="form.depreciation_method"><option value="straight_line">{{ t("asset.straight") }}</option><option value="declining_balance">{{ t("asset.declining") }}</option><option value="non_depreciable">{{ t("asset.nonDepreciable") }}</option></select></label
+          ><label v-if="modal === 'policy' && can('assets.finance')"
+            >{{ t("asset.method") }}<select v-model="form.depreciation_method"><option value="straight_line">{{ t("asset.straight") }}</option><option value="declining_balance">{{ t("asset.declining") }}</option><option value="non_depreciable">{{ t("asset.nonDepreciable") }}</option></select></label>
           <p class="hint">
-            0 = manual only. Interval dipakai pada aset baru dan setelah
-            maintenance selesai.
+            {{ copy("0 = manual saja. Interval diterapkan pada aset baru dan setelah pemeliharaan selesai.", "0 = manual only. The interval applies to new assets and after maintenance is completed.") }}
           </p>
           <label v-if="modal === 'policy'" class="check-label"
-            ><input type="checkbox" v-model="form.apply_to_existing" /> Terapkan
-            juga ke aset existing tanpa request/job aktif.</label
+            ><input type="checkbox" v-model="form.apply_to_existing" /> {{ copy("Terapkan juga ke aset yang ada tanpa permintaan atau pekerjaan aktif.", "Also apply to existing assets without an active request or work order.") }}</label
           ></template
-        ><template v-if="['user', 'access'].includes(modal)"
-          ><label class="check-label"
-            ><input
-              type="checkbox"
-              v-model="form.all_branches"
-              :disabled="form.role === 'admin'"
-            />
-            Company-wide branch access (admin selalu company-wide)</label
-          >
-          <fieldset v-if="!form.all_branches && form.role !== 'admin'">
-            <legend>Allowed branches</legend>
-            <label v-for="b in branches" :key="b.id" class="check-label"
+        ><template v-if="['user', 'access'].includes(modal)">
+          <template v-if="me?.role === 'admin'">
+            <label class="check-label"
               ><input
                 type="checkbox"
-                v-model="form.branch_ids"
-                :value="b.id"
-              />{{ b.code }} · {{ b.name }}</label
+                v-model="form.all_branches"
+                :disabled="form.role === 'admin' || form.role === 'branch_admin'"
+              />
+              {{ copy("Akses seluruh cabang", "Access all branches") }}</label
             >
-          </fieldset></template
-        >
+            <fieldset v-if="!form.all_branches && form.role !== 'admin'">
+              <legend>{{ form.role === 'branch_admin' ? copy("Cabang administrator", "Administrator branch") : copy("Cakupan cabang", "Branch scope") }}</legend>
+              <label v-for="b in branches" :key="b.id" class="check-label">
+                <input
+                  :type="form.role === 'branch_admin' ? 'radio' : 'checkbox'"
+                  name="user-branch-scope"
+                  :checked="form.branch_ids?.includes(b.id)"
+                  @change="setBranchScope(b.id, ($event.target as HTMLInputElement).checked)"
+                />{{ b.code }} · {{ b.name }}
+              </label>
+            </fieldset>
+          </template>
+          <p v-else class="hint">{{ copy("Akun baru dan perubahan akses hanya berlaku di cabang Anda.", "New accounts and access changes are limited to your branch.") }}</p>
+        </template>
         <template v-if="modal === 'stocktake'"
           ><label
-            >Title<input
+            >{{ copy("Judul", "Title") }}<input
               v-model="form.title"
               required
               minlength="3"
               maxlength="200" /></label
           ><label
-            >Location<select v-model.number="form.location_id" required>
+            >{{ t("common.location") }}<select v-model.number="form.location_id" required>
               <option v-for="l in locations" :key="l.id" :value="l.id">
                 {{ l.branch_name ? l.branch_name + " · " : "" }}{{ l.name }}
               </option>
             </select></label
           >
           <p class="hint">
-            Snapshot aset non-disposed di lokasi ini. Perubahan setelah snapshot
-            akan terlihat sebagai discrepancy.
+            {{ copy("Snapshot aset yang belum dilepas di lokasi ini. Perubahan setelah snapshot akan ditandai sebagai selisih.", "Snapshot of non-disposed assets at this location. Changes after the snapshot are flagged as discrepancies.") }}
           </p></template
         ><template v-if="modal === 'observe'"
           ><label
-            >Asset tag<input
+            >{{ t("asset.tag") }}<input
               v-model="form.tag"
               required
               maxlength="80"
-              placeholder="Scan atau ketik tag" /></label
+              :placeholder="copy('Pindai atau ketik tag', 'Scan or enter a tag')" /></label
           ><label
-            >Notes<textarea
+            >{{ copy("Catatan", "Notes") }}<textarea
               v-model="form.notes"
               maxlength="1000"
             ></textarea></label></template
         ><template v-if="modal === 'closeStocktake'"
           ><p>
-            Snapshot akan dikunci. Missing asset harus diinvestigasi; aksi ini
-            tidak mengubah status aset.
+            {{ copy("Snapshot akan dikunci. Aset yang belum ditemukan harus diselidiki; tindakan ini tidak mengubah status aset.", "The snapshot will be locked. Missing assets must be investigated; this action does not change asset status.") }}
           </p>
           <label class="check-label"
-            ><input type="checkbox" v-model="form.acknowledge" /> Saya mengakui
-            discrepancy missing/changed yang ada.</label
+            ><input type="checkbox" v-model="form.acknowledge" /> {{ copy("Saya memahami selisih aset yang belum ditemukan atau berubah.", "I acknowledge the missing or changed asset discrepancies.") }}</label
           ></template
         ><template v-if="modal === 'stocktakeItems'"
           ><p>{{ form.title }}</p>
@@ -1470,8 +1791,8 @@ onUnmounted(() => {
             <table>
               <thead>
                 <tr>
-                  <th>Tag</th>
-                  <th>Observed</th>
+                  <th>{{ t("asset.tag") }}</th>
+                  <th>{{ copy("Teramati", "Observed") }}</th>
                   <th>Version</th>
                 </tr>
               </thead>
@@ -1481,13 +1802,13 @@ onUnmounted(() => {
                     {{ i.expected_tag }}<small>{{ i.name }}</small>
                   </td>
                   <td>
-                    {{ i.observed ? "Yes" : "Missing"
+                    {{ i.observed ? copy("Ya", "Yes") : copy("Belum ditemukan", "Missing")
                     }}<small>{{ i.notes }}</small>
                   </td>
                   <td>
                     {{ i.expected_version }} → {{ i.current_version
                     }}<small v-if="i.expected_version !== i.current_version"
-                      >Changed after snapshot</small
+                      >{{ copy("Berubah setelah snapshot", "Changed after snapshot") }}</small
                     >
                   </td>
                 </tr>
@@ -1495,7 +1816,7 @@ onUnmounted(() => {
             </table>
           </div>
           <div class="pagination">
-            <span>Page {{ form.page }}</span>
+            <span>{{ copy("Halaman", "Page") }} {{ form.page }}</span>
             <div>
               <button
                 type="button"
@@ -1503,27 +1824,33 @@ onUnmounted(() => {
                 :disabled="form.page === 1"
                 class="secondary"
               >
-                Prev</button
+                {{ copy("Sebelumnya", "Prev") }}</button
               ><button
                 type="button"
                 @click="stocktakePage(1)"
                 :disabled="form.items.length < 25"
                 class="secondary"
               >
-                Next
+                {{ copy("Berikutnya", "Next") }}
               </button>
             </div>
           </div></template
-        ><template v-if="modal === 'password'"
+        ><template v-if="modal === 'history'">
+          <p><b>{{ selected?.name }}</b> · {{ selected?.tag }}</p>
+          <div class="table-scroll"><table><thead><tr><th>{{ locale === "id" ? "Waktu" : "When" }}</th><th>{{ locale === "id" ? "Perubahan" : "Movement" }}</th><th>{{ locale === "id" ? "Dari → ke" : "From → to" }}</th><th>{{ locale === "id" ? "Pengguna" : "Actor" }}</th></tr></thead><tbody>
+            <tr v-for="entry in historyRecords" :key="entry.id"><td>{{ timestamp(entry.occurred_at) }}</td><td>{{ entry.event }}<small>{{ entry.note }}</small></td><td>{{ entry.from_location || "—" }} → {{ entry.to_location || "—" }}<small>{{ entry.from_custodian || "—" }} → {{ entry.to_custodian || "—" }}</small></td><td>{{ entry.actor }}</td></tr>
+            <tr v-if="!historyRecords.length"><td colspan="4" class="empty">{{ locale === "id" ? "Belum ada riwayat." : "No history yet." }}</td></tr>
+          </tbody></table></div>
+        </template><template v-if="modal === 'password'"
           ><label
-            >Current password<input
+            >{{ copy("Password saat ini", "Current password") }}<input
               type="password"
               v-model="form.current_password"
               required
               maxlength="72"
               autocomplete="current-password" /></label
           ><label
-            >New password<input
+            >{{ copy("Password baru", "New password") }}<input
               type="password"
               v-model="form.new_password"
               required
@@ -1531,26 +1858,26 @@ onUnmounted(() => {
               maxlength="72"
               autocomplete="new-password"
           /></label>
-          <p>Seluruh sesi akan dicabut setelah password berubah.</p></template
+          <p>{{ copy("Semua sesi akan dicabut setelah password diubah.", "All sessions will be revoked after the password changes.") }}</p></template
         ><template v-if="modal === 'access'"
           ><label
-            >Role<select v-model="form.role">
+            >{{ copy("Peran", "Role") }}<select v-model="form.role">
               <option
-                v-for="role in ['admin', 'manager', 'operator', 'auditor']"
-                :key="role"
+                v-for="role in roleOptions"
+                :key="role.id"
+                :value="role.id"
               >
-                {{ role }}
+                {{ role.label }}
               </option>
             </select></label
           ><label class="check-label"
-            ><input type="checkbox" v-model="form.active" /> Active
-            account</label
+            ><input type="checkbox" v-model="form.active" /> {{ copy("Akun aktif", "Active account") }}</label
           >
-          <p>Seluruh sesi user ini akan dicabut.</p></template
-        ><template v-if="modal === 'asset'"
+          <p>{{ copy("Semua sesi pengguna ini akan dicabut.", "All sessions for this user will be revoked.") }}</p></template
+        ><template v-if="['asset', 'editAsset'].includes(modal)"
           ><div class="form-grid">
-            <label
-              >Branch<select
+            <label v-if="modal === 'asset'"
+              >{{ t("common.branch") }}<select
                 v-model.number="form.asset_branch_id"
                 required
                 @change="form.location_id = assetLocations[0]?.id"
@@ -1561,23 +1888,23 @@ onUnmounted(() => {
               </select></label
             >
             <label
-              >Asset tag<input
+              >{{ t("asset.tag") }}<input
                 v-model="form.tag"
                 required
                 maxlength="80"
                 placeholder="AST-000001" /></label
             ><label
-              >Name<input
+              >{{ copy("Nama", "Name") }}<input
                 v-model="form.name"
                 required
                 minlength="2"
                 maxlength="200" /></label
             ><label
-              >Serial number<input
+              >{{ t("asset.serial") }}<input
                 v-model="form.serial_number"
                 maxlength="200" /></label
             ><label
-              >Category<select
+              >{{ t("asset.category") }}<select
                 v-model.number="form.category_id"
                 required
                 @change="
@@ -1591,18 +1918,32 @@ onUnmounted(() => {
                 </option>
               </select></label
             ><label
-              >Location<select v-model.number="form.location_id" required>
+              >{{ t("common.location") }}<select v-model.number="form.location_id" required>
                 <option v-for="l in assetLocations" :key="l.id" :value="l.id">
                   {{ l.branch_name ? l.branch_name + " · " : "" }}{{ l.name }}
                 </option>
               </select></label
             ><label
-              >Purchase date<input
+              >{{ t("asset.purchaseDate") }}<input
                 v-model="form.purchase_date"
                 type="date"
-                required /></label
+                required
+                @change="form.depreciation_start_date = form.depreciation_start_date < form.purchase_date ? form.purchase_date : form.depreciation_start_date" /></label
+            ><label v-if="can('assets.finance')"
+              >{{ t("asset.method") }}<select v-model="form.depreciation_method" required>
+                <option value="straight_line">{{ t("asset.straight") }}</option>
+                <option value="declining_balance">{{ t("asset.declining") }}</option>
+                <option value="non_depreciable">{{ t("asset.nonDepreciable") }}</option>
+              </select></label
+            ><label v-if="can('assets.finance')"
+              >{{ t("asset.start") }}<input v-model="form.depreciation_start_date" type="date" :min="form.purchase_date" required /></label
             ><label
-              >Purchase cost (Rp)<input
+              >{{ t("asset.supplier") }}<input v-model="form.supplier_name" maxlength="200" /></label
+            ><label
+              >{{ t("asset.reference") }}<input v-model="form.acquisition_reference" maxlength="100" /></label
+            ><label
+              v-if="can('assets.finance')"
+              >{{ t("asset.cost") }}<input
                 v-model.number="form.purchase_cost"
                 type="number"
                 min="0"
@@ -1610,7 +1951,8 @@ onUnmounted(() => {
                 step="1"
                 required /></label
             ><label
-              >Salvage value (Rp)<input
+              v-if="can('assets.finance')"
+              >{{ t("asset.salvage") }}<input
                 v-model.number="form.salvage_value"
                 type="number"
                 min="0"
@@ -1618,20 +1960,20 @@ onUnmounted(() => {
                 step="1"
                 required /></label
             ><label
-              >Useful life (months)<input
+              >{{ t("asset.life") }}<input
                 v-model.number="form.useful_life_months"
                 type="number"
                 min="1"
                 max="1200"
                 required /></label
             ><label
-              >Warranty until<input
+              >{{ t("asset.warranty") }}<input
                 v-model="form.warranty_until"
                 type="date"
                 :min="form.purchase_date"
             /></label></div></template
         ><label v-if="modal === 'assign'"
-          >Nama / ID penanggung jawab<input
+          >{{ copy("Nama / ID penanggung jawab", "Custodian name / ID") }}<input
             v-model="form.custodian"
             required
             minlength="2"
@@ -1639,12 +1981,12 @@ onUnmounted(() => {
         ><template v-if="modal === 'request'"
           ><p>{{ selected?.tag }} · {{ selected?.name }}</p>
           <label
-            >Request type<select v-model="form.kind">
-              <option value="transfer">Transfer</option>
-              <option value="dispose">Disposal</option>
+            >{{ copy("Jenis permintaan", "Request type") }}<select v-model="form.kind">
+              <option value="transfer">{{ copy("Transfer", "Transfer") }}</option>
+              <option value="dispose">{{ copy("Pelepasan", "Disposal") }}</option>
             </select></label
           ><label v-if="form.kind === 'transfer'"
-            >Target location<select
+            >{{ copy("Lokasi tujuan", "Target location") }}<select
               v-model.number="form.target_location_id"
               required
             >
@@ -1659,38 +2001,39 @@ onUnmounted(() => {
               </option>
             </select></label
           ><label
-            >Reason<textarea
+            >{{ t("common.reason") }}<textarea
               v-model="form.reason"
               minlength="3"
               maxlength="1000"
               required
             ></textarea>
           </label>
+          <label v-if="form.kind === 'dispose' && can('assets.finance')">{{ locale === "id" ? "Hasil pelepasan (Rp)" : "Disposal proceeds (IDR)" }}<input v-model.number="form.disposal_proceeds" type="number" min="0" max="1000000000000000" step="1" required /></label>
           <p class="hint">
-            Perubahan berlaku setelah approval oleh admin/manager yang berbeda.
+            {{ copy("Perubahan berlaku setelah disetujui oleh admin atau manajer lain.", "Changes take effect after approval by a different administrator or manager.") }}
           </p></template
         ><template v-if="modal === 'maintenance'"
           ><p>{{ selected?.tag }} · {{ selected?.name }}</p>
           <label
-            >Job title<input
+            >{{ copy("Judul pekerjaan", "Job title") }}<input
               v-model="form.title"
               required
               minlength="3"
               maxlength="200" /></label
           ><label
-            >Due date<input
+            >{{ copy("Tanggal jatuh tempo", "Due date") }}<input
               v-model="form.due_date"
               type="date"
               required /></label></template
         ><template v-if="['location', 'category', 'user'].includes(modal)"
           ><label
-            >Name<input
+            >{{ copy("Nama", "Name") }}<input
               v-model="form.name"
               required
               minlength="2"
               maxlength="100" /></label
           ><label v-if="modal === 'category'"
-            >Useful life (months)<input
+            >{{ t("asset.life") }}<input
               v-model.number="form.useful_life_months"
               type="number"
               min="1"
@@ -1704,7 +2047,7 @@ onUnmounted(() => {
               required
               maxlength="254" /></label
           ><label
-            >Initial password<input
+            >{{ copy("Password awal", "Initial password") }}<input
               v-model="form.password"
               type="password"
               minlength="12"
@@ -1712,17 +2055,18 @@ onUnmounted(() => {
               autocomplete="new-password"
               required /></label
           ><label
-            >Role<select v-model="form.role">
+            >{{ copy("Peran", "Role") }}<select v-model="form.role">
               <option
-                v-for="role in ['admin', 'manager', 'operator', 'auditor']"
-                :key="role"
+                v-for="role in roleOptions"
+                :key="role.id"
+                :value="role.id"
               >
-                {{ role }}
+                {{ role.label }}
               </option>
             </select></label
           ></template
         ><label v-if="modal === 'decision'"
-          >Decision note<textarea
+          >{{ copy("Catatan keputusan", "Decision note") }}<textarea
             v-model="form.note"
             :required="!form.approve"
             :minlength="form.approve ? 0 : 3"
@@ -1730,7 +2074,7 @@ onUnmounted(() => {
           ></textarea></label
         ><template v-if="modal === 'complete'"
           ><label
-            >Actual cost (Rp)<input
+            >{{ copy("Biaya aktual (Rp)", "Actual cost (IDR)") }}<input
               v-model.number="form.cost"
               type="number"
               min="0"
@@ -1738,13 +2082,13 @@ onUnmounted(() => {
               max="1000000000000000"
               required /></label
           ><label
-            >Notes<textarea
+            >{{ copy("Catatan", "Notes") }}<textarea
               v-model="form.notes"
               maxlength="2000"
             ></textarea></label
         ></template>
         <p v-if="['return', 'start', 'cancel'].includes(modal)">
-          Konfirmasi aksi ini. Perubahan status dan audit akan disimpan.
+          {{ copy("Konfirmasi tindakan ini. Perubahan status dan audit akan disimpan.", "Confirm this action. The status change and audit record will be saved.") }}
         </p>
         <div v-if="error" class="alert" role="alert">{{ error }}</div>
         <div class="modal-footer">
@@ -1754,13 +2098,13 @@ onUnmounted(() => {
             @click="modal = ''"
             :disabled="saving"
           >
-            Batal</button
+            {{ t("common.cancel") }}</button
           ><button
-            v-if="modal !== 'stocktakeItems'"
+            v-if="modal !== 'stocktakeItems' && modal !== 'history'"
             class="primary"
             :disabled="saving"
           >
-            {{ saving ? "Menyimpan…" : "Simpan & konfirmasi" }}
+            {{ saving ? copy("Menyimpan…", "Saving…") : copy("Simpan & konfirmasi", "Save & confirm") }}
           </button>
         </div>
       </form>

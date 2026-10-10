@@ -55,7 +55,7 @@ func (s *Server) recordActivity(r *http.Request, status int, duration time.Durat
 	if u == nil {
 		if cookie, e := r.Cookie("assetflow_session"); e == nil {
 			var a User
-			e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,u.name,u.email,u.role,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id=u.id ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active`, hash(cookie.Value)).Scan(&a.ID, &a.OrgID, &a.Name, &a.Email, &a.Role, &a.AllBranches, &a.BranchIDs)
+			e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,u.name,u.email,u.role,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active AND u.deleted_at IS NULL`, hash(cookie.Value)).Scan(&a.ID, &a.OrgID, &a.Name, &a.Email, &a.Role, &a.AllBranches, &a.BranchIDs)
 			if e == nil {
 				u = &a
 			}
@@ -175,5 +175,5 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 func (s *Server) listActivity(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
 	u := actor(r)
-	return s.rows(w, r, `SELECT id,actor_id,actor_name,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,created_at,branch_id,related_branch_id,attempted_email FROM user_activity_logs WHERE org_id=$1 AND ($2 OR actor_id=$3 OR can_access_branch(org_id,$3,branch_id) OR can_access_branch(org_id,$3,related_branch_id) OR (branch_id IS NULL AND actor_branch_ids && $4::bigint[])) AND ($5='' OR event=$5) AND ($8::bigint=0 OR branch_id=$8 OR related_branch_id=$8 OR (branch_id IS NULL AND $8=ANY(actor_branch_ids))) ORDER BY id DESC LIMIT $6 OFFSET $7`, u.OrgID, u.AllBranches, u.ID, u.BranchIDs, r.URL.Query().Get("event"), z, (p-1)*z, selectedBranch(r))
+	return s.rows(w, r, `SELECT id,actor_id,actor_name,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,created_at,branch_id,related_branch_id,attempted_email FROM user_activity_logs WHERE org_id=$1 AND ($2 OR can_access_branch(org_id,$3,branch_id) OR can_access_branch(org_id,$3,related_branch_id)) AND ($4='' OR event=$4) AND ($7::bigint=0 OR branch_id=$7 OR related_branch_id=$7) ORDER BY id DESC LIMIT $5 OFFSET $6`, u.OrgID, u.AllBranches, u.ID, r.URL.Query().Get("event"), z, (p-1)*z, selectedBranch(r))
 }

@@ -2,6 +2,8 @@
 
 Base path `/api`. v2 introduces branch scopes and category maintenance policy. JSON request/response. POST wajib header `Content-Type: application/json`, `X-Requested-With: AssetFlow`. Jika Origin ada harus cocok exact `APP_ORIGIN`. Browser menggunakan session cookie; token tidak dikirim ke localStorage. Org tidak boleh dipilih ulang sesudah login; berasal dari DB user session.
 
+Desain alur dan batas akuntansi 10 fitur dijelaskan di [FEATURE-FLOW-AND-DESIGN.md](FEATURE-FLOW-AND-DESIGN.md).
+
 Errors: `{"error":"message"}`. HTTP 400 malformed JSON, 401 unauthenticated/session expired, 403 role/CSRF/self approval, 409 version/state/duplicate conflict, 415 content-type, 422 invalid reference/validation, 429 login throttled, 500 internal, 503 activity persistence unavailable. Pada timeout atau 503 activity audit, mutasi domain mungkin sudah commit; client harus refresh untuk memeriksa state sebelum retry. Belum ada generic idempotency-key middleware.
 
 | Method | Endpoint | Role / response |
@@ -32,6 +34,17 @@ Errors: `{"error":"message"}`. HTTP 400 malformed JSON, 401 unauthenticated/sess
 | POST | /stocktakes/{id}/observe | Admin/manager/operator |
 | POST | /stocktakes/{id}/close | Admin/manager |
 | POST | /exports/assets | All authenticated, server CSV current page + audit |
+| GET | /assets/{id}/history | Role dengan `assets.history`, immutable movement timeline, detail disamarkan di luar cabang |
+| GET | /contracts | Role dengan `contracts.read`, renewal status by branch |
+| POST | /contracts | Role dengan `contracts.manage`, creates asset- or branch-level service contract |
+| DELETE | /contracts/{id} | Role dengan `contracts.manage`, soft delete |
+| GET | /finance/depreciation?period=YYYY-MM | Finance reader, period schedule and carrying values |
+| GET/POST | /finance/valuations | Propose or list maker-checker revaluations |
+| POST | /finance/valuations/{id}/decision | Valuation checker, approval/rejection with reason |
+| GET/POST | /finance/settings | Read or update generic chart-of-account codes |
+| GET | /finance/journals?period=YYYY-MM | Finance reader, generic double-entry preview |
+| POST | /exports/journal | Finance role with report export, audited generic CSV |
+| GET | /reports/compliance | Manager/auditor and report roles, non-financial compliance snapshot |
 | GET | /branches | All, only accessible branches |
 | POST | /branches | Admin company master |
 | GET | /activity?page=1&size=25&event= | Admin/manager/auditor, scoped activity |
@@ -52,7 +65,7 @@ Login:
 
 Register:
 ```json
-{"tag":"AST-000001","name":"Lenovo ThinkPad T14","serial_number":"SN-UNIQUE-001","category_id":1,"location_id":1,"purchase_date":"2026-10-01","purchase_cost":18000000,"salvage_value":1000000,"useful_life_months":48,"warranty_until":"2029-10-01"}
+{"tag":"AST-000001","name":"Lenovo ThinkPad T14","serial_number":"SN-UNIQUE-001","category_id":1,"location_id":1,"purchase_date":"2026-10-01","purchase_cost":18000000,"salvage_value":1000000,"useful_life_months":48,"depreciation_method":"straight_line","depreciation_start_date":"2026-10-01","supplier_name":"Example supplier","acquisition_reference":"PO-2026-001","warranty_until":"2029-10-01"}
 ```
 
 Assign / return:
@@ -68,7 +81,7 @@ Transfer / disposal (asset must be available):
 {"asset_id":1,"kind":"transfer","target_location_id":2,"reason":"Dipindahkan ke cabang Bandung","version":3}
 ```
 ```json
-{"asset_id":1,"kind":"dispose","target_location_id":null,"reason":"Tidak ekonomis diperbaiki","version":4}
+{"asset_id":1,"kind":"dispose","target_location_id":null,"reason":"Tidak ekonomis diperbaiki","disposal_proceeds":2500000,"version":4}
 ```
 
 Decision:

@@ -57,8 +57,22 @@ func TestAPIIntegration(t *testing.T) {
 	if _, e = db.Exec(ctx, string(migration)); e != nil {
 		t.Fatal(e)
 	}
+	migration, e = os.ReadFile("../../migrations/003_roles_scope_archive.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(ctx, string(migration)); e != nil {
+		t.Fatal(e)
+	}
+	migration, e = os.ReadFile("../../migrations/004_finance_lifecycle.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(ctx, string(migration)); e != nil {
+		t.Fatal(e)
+	}
 	pw, _ := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.MinCost)
-	for _, q := range []string{`INSERT INTO organizations(name) VALUES('One'),('Two')`, `INSERT INTO branches(org_id,code,name) VALUES(1,'HQ','Main'),(1,'BDG','Bandung'),(2,'HQ','Secret')`, `INSERT INTO locations(org_id,branch_id,name) VALUES(1,1,'HQ'),(1,2,'Branch'),(2,3,'Secret')`, `INSERT INTO categories(org_id,name,useful_life_months) VALUES(1,'IT',48),(2,'IT',48)`} {
+	for _, q := range []string{`INSERT INTO organizations(name) VALUES('One'),('Two')`, `INSERT INTO branches(org_id,code,name) VALUES(1,'BDG','Bandung'),(1,'JKT','Jakarta'),(1,'HQ','Main'),(2,'HQ','Secret')`, `INSERT INTO locations(org_id,branch_id,name) VALUES(1,1,'Bandung'),(1,2,'Jakarta'),(1,3,'HQ'),(2,4,'Secret')`, `INSERT INTO categories(org_id,name,useful_life_months) VALUES(1,'IT',48),(2,'IT',48)`} {
 		if _, e = db.Exec(ctx, q); e != nil {
 			t.Fatal(e)
 		}
@@ -66,11 +80,30 @@ func TestAPIIntegration(t *testing.T) {
 	for _, u := range []struct {
 		org  int
 		role string
-	}{{1, "admin"}, {1, "manager"}, {1, "operator"}, {1, "auditor"}, {2, "admin"}} {
-		_, e = db.Exec(ctx, `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES($1,$2,$3,$4,$2,true)`, u.org, u.role, u.role+"@test.local", string(pw))
+	}{{1, "admin"}, {1, "manager"}, {1, "operator"}, {1, "auditor"}, {2, "admin"}, {1, "finance"}, {1, "it_support"}, {1, "it_developer"}} {
+		_, e = db.Exec(ctx, `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES($1,$2,$3,$4,$2,$5)`, u.org, u.role, u.role+"@test.local", string(pw), u.role == "admin")
 		if e != nil {
 			t.Fatal(e)
 		}
+	}
+	if _, e = db.Exec(ctx, `INSERT INTO user_branches(org_id,user_id,branch_id) SELECT u.org_id,u.id,b.id FROM users u CROSS JOIN branches b WHERE u.org_id=1 AND u.role<>'admin' AND b.org_id=1 AND b.code IN ('BDG','JKT')`); e != nil {
+		t.Fatal(e)
+	}
+	var branchAdminID int64
+	tx, e := db.Begin(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = tx.QueryRow(ctx, `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES(1,'Branch Admin','branch-admin@test.local',$1,'branch_admin',false) RETURNING id`, string(pw)).Scan(&branchAdminID); e != nil {
+		tx.Rollback(ctx)
+		t.Fatal(e)
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO user_branches(org_id,user_id,branch_id) VALUES(1,$1,2)`, branchAdminID); e != nil {
+		tx.Rollback(ctx)
+		t.Fatal(e)
+	}
+	if e = tx.Commit(ctx); e != nil {
+		t.Fatal(e)
 	}
 	h := (&Server{DB: db, Origin: "http://localhost", Secure: false}).Routes()
 	call := func(method, path, cookie string, body any) *httptest.ResponseRecorder {
@@ -105,6 +138,7 @@ func TestAPIIntegration(t *testing.T) {
 		return c.Name + "=" + c.Value
 	}
 	admin, manager, operator, auditor, other := cookie("admin", 1), cookie("manager", 1), cookie("operator", 1), cookie("auditor", 1), cookie("admin", 2)
+	finance, branchAdmin, itSupport, itDeveloper := cookie("finance", 1), cookie("branch-admin", 1), cookie("it_support", 1), cookie("it_developer", 1)
 	assetBody := func(tag string) map[string]any {
 		return map[string]any{"tag": tag, "name": "Laptop", "serial_number": "", "category_id": 1, "location_id": 1, "purchase_date": "2026-01-01", "purchase_cost": 10000000, "salvage_value": 1000000, "useful_life_months": 48, "warranty_until": nil}
 	}
@@ -112,10 +146,16 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("GET", "/api/assets", "", nil), 401)
 		expect(t, call("POST", "/api/assets", auditor, assetBody("DENIED")), 403)
 		expect(t, call("GET", "/api/users", operator, nil), 403)
+		expect(t, call("GET", "/api/audit", manager, nil), 403)
+		expect(t, call("GET", "/api/activity", auditor, nil), 403)
+		expect(t, call("GET", "/api/assets?branch_id=3", manager, nil), 403)
+		expect(t, call("POST", "/api/branches", branchAdmin, map[string]any{"code": "OUT", "name": "Forbidden"}), 403)
+		expect(t, call("POST", "/api/assets", itDeveloper, assetBody("ITDEV-DENIED")), 403)
+		expect(t, call("POST", "/api/users", branchAdmin, map[string]any{"name": "Escalation", "email": "escalate@test.local", "password": "test-password-123", "role": "admin", "all_branches": true}), 403)
 		expect(t, call("POST", "/api/assets", operator, assetBody("AST-1")), 201)
 		expect(t, call("POST", "/api/assets", operator, assetBody("AST-1")), 409)
 		b := assetBody("CROSS")
-		b["location_id"] = 3
+		b["location_id"] = 4
 		expect(t, call("POST", "/api/assets", operator, b), 403)
 		w := call("GET", "/api/assets", other, nil)
 		expect(t, w, 200)
@@ -186,7 +226,8 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/stocktakes/1/observe", operator, map[string]any{"tag": "AST-1", "notes": ""}), 409)
 	})
 	t.Run("audit-immutability", func(t *testing.T) {
-		expect(t, call("GET", "/api/audit", auditor, nil), 200)
+		expect(t, call("GET", "/api/audit", auditor, nil), 403)
+		expect(t, call("GET", "/api/audit", branchAdmin, nil), 200)
 		expect(t, call("GET", "/api/audit", operator, nil), 403)
 		if _, e := db.Exec(ctx, `DELETE FROM audit_logs`); e == nil {
 			t.Fatal("audit deletion allowed")
@@ -201,6 +242,95 @@ func TestAPIIntegration(t *testing.T) {
 	})
 
 	t.Run("branch-scopes-and-activity", func(t *testing.T) {
+		login := call("POST", "/api/login", "", map[string]any{"email": "branch-admin@test.local", "password": "test-password-123", "org_id": 1, "branch_id": 0})
+		expect(t, login, 200)
+		var loginBody struct {
+			ActiveBranch int64 `json:"active_branch_id"`
+		}
+		if e := json.Unmarshal(login.Body.Bytes(), &loginBody); e != nil || loginBody.ActiveBranch != 2 {
+			t.Fatalf("branch admin login did not fall back to its permitted branch: %+v (%v)", loginBody, e)
+		}
+		branchList := call("GET", "/api/branches", branchAdmin, nil)
+		expect(t, branchList, 200)
+		var allowedBranches []map[string]any
+		if e := json.Unmarshal(branchList.Body.Bytes(), &allowedBranches); e != nil || len(allowedBranches) != 1 || allowedBranches[0]["id"] != float64(2) {
+			t.Fatalf("branch admin received out-of-scope branches: %s", branchList.Body.String())
+		}
+		expect(t, call("GET", "/api/assets?branch_id=1", branchAdmin, nil), 403)
+		expect(t, call("GET", "/api/audit?branch_id=1", branchAdmin, nil), 403)
+		expect(t, call("GET", "/api/activity", branchAdmin, nil), 200)
+		created := call("POST", "/api/users", branchAdmin, map[string]any{"name": "Branch Employee", "email": "branch-employee@test.local", "password": "test-password-123", "role": "employee", "all_branches": true, "branch_ids": []int64{1}})
+		expect(t, created, 201)
+		var createdUser map[string]int64
+		if e := json.Unmarshal(created.Body.Bytes(), &createdUser); e != nil {
+			t.Fatal(e)
+		}
+		var scopedBranches []int64
+		if e := db.QueryRow(ctx, `SELECT ARRAY(SELECT branch_id FROM user_branches WHERE user_id=$1)`, createdUser["id"]).Scan(&scopedBranches); e != nil || len(scopedBranches) != 1 || scopedBranches[0] != 2 {
+			t.Fatalf("branch admin assignment escaped its branch: %v (%v)", scopedBranches, e)
+		}
+		localCategory := call("POST", "/api/categories", branchAdmin, map[string]any{"name": "Jakarta Assets", "useful_life_months": 48, "maintenance_interval_days": 0, "maintenance_instructions": "", "branch_id": 1})
+		expect(t, localCategory, 201)
+		var localCategoryID int64
+		if e := db.QueryRow(ctx, `SELECT id FROM categories WHERE org_id=1 AND name='Jakarta Assets' AND branch_id=2`).Scan(&localCategoryID); e != nil {
+			t.Fatalf("branch admin category escaped scope or was not created locally: %v", e)
+		}
+		if _, e := db.Exec(ctx, `INSERT INTO categories(org_id,name,useful_life_months,branch_id) VALUES(1,'Bandung Assets',48,1)`); e != nil {
+			t.Fatal(e)
+		}
+		branchCategories := call("GET", "/api/categories", branchAdmin, nil)
+		expect(t, branchCategories, 200)
+		if strings.Contains(branchCategories.Body.String(), "Bandung Assets") || !strings.Contains(branchCategories.Body.String(), "Jakarta Assets") {
+			t.Fatalf("branch admin category list crossed branch scope: %s", branchCategories.Body.String())
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/categories/%d/policy", localCategoryID), branchAdmin, map[string]any{"maintenance_interval_days": 30, "maintenance_instructions": "Inspect locally", "version": 1, "apply_to_existing": false}), 200)
+		expect(t, call("DELETE", fmt.Sprintf("/api/categories/%d", localCategoryID), branchAdmin, nil), 200)
+		expect(t, call("GET", "/api/categories?archived=true", branchAdmin, nil), 200)
+		expect(t, call("POST", fmt.Sprintf("/api/categories/%d/restore", localCategoryID), branchAdmin, nil), 200)
+		var branchAsset int64
+		if e := db.QueryRow(ctx, `INSERT INTO assets(org_id,tag,name,category_id,location_id,purchase_date,purchase_cost,salvage_value,useful_life_months) VALUES(1,'BRANCH-1','Branch laptop',1,2,'2026-01-01',9900000,0,48) RETURNING id`).Scan(&branchAsset); e != nil {
+			t.Fatal(e)
+		}
+		branchEdit := assetBody("BRANCH-1")
+		branchEdit["name"] = "Branch-managed laptop"
+		branchEdit["location_id"] = 2
+		branchEdit["purchase_cost"] = int64(9900000)
+		branchEdit["version"] = 1
+		expect(t, call("POST", fmt.Sprintf("/api/assets/%d", branchAsset), branchAdmin, branchEdit), 200)
+		var editedName string
+		if e := db.QueryRow(ctx, `SELECT name FROM assets WHERE id=$1`, branchAsset).Scan(&editedName); e != nil || editedName != "Branch-managed laptop" {
+			t.Fatalf("branch admin could not edit its asset: %q (%v)", editedName, e)
+		}
+		expect(t, call("POST", "/api/assets/1", branchAdmin, map[string]any{"tag": "CROSS-BRANCH", "name": "Forbidden", "category_id": 1, "location_id": 1, "purchase_date": "2026-01-01", "purchase_cost": 0, "salvage_value": 0, "useful_life_months": 48, "version": 1}), 404)
+		branchAssets := call("GET", "/api/assets", branchAdmin, nil)
+		expect(t, branchAssets, 200)
+		if !strings.Contains(branchAssets.Body.String(), "BRANCH-1") || !strings.Contains(branchAssets.Body.String(), "9900000") {
+			t.Fatalf("branch administrator cannot see its branch or financial data: %s", branchAssets.Body.String())
+		}
+		financeAssets := call("GET", "/api/assets", finance, nil)
+		expect(t, financeAssets, 200)
+		if !strings.Contains(financeAssets.Body.String(), "9900000") {
+			t.Fatalf("finance role cannot see allowed financial data: %s", financeAssets.Body.String())
+		}
+		itAssets := call("GET", "/api/assets", itSupport, nil)
+		expect(t, itAssets, 200)
+		if strings.Contains(itAssets.Body.String(), "purchase_cost") || strings.Contains(itAssets.Body.String(), "9900000") {
+			t.Fatalf("IT support received financial data: %s", itAssets.Body.String())
+		}
+		itDashboard := call("GET", "/api/dashboard", itSupport, nil)
+		expect(t, itDashboard, 200)
+		if strings.Contains(itDashboard.Body.String(), "purchase_value") {
+			t.Fatalf("IT support received financial summary: %s", itDashboard.Body.String())
+		}
+		export := call("POST", "/api/exports/assets", itSupport, map[string]any{"page": 1, "size": 25, "branch_id": 0})
+		expect(t, export, 200)
+		if strings.Contains(export.Body.String(), "purchase_cost") || strings.Contains(export.Body.String(), "9900000") {
+			t.Fatalf("non-finance export leaked costs: %s", export.Body.String())
+		}
+		developerAudit := call("GET", "/api/audit", itDeveloper, nil)
+		expect(t, developerAudit, 403)
+		_ = branchAsset
+
 		var restrictedID int64
 		e := db.QueryRow(ctx, `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES(1,'Branch operator','scoped@test.local',$1,'operator',false) RETURNING id`, string(pw)).Scan(&restrictedID)
 		if e != nil {
@@ -209,9 +339,9 @@ func TestAPIIntegration(t *testing.T) {
 		if _, e = db.Exec(ctx, `INSERT INTO user_branches(org_id,user_id,branch_id) VALUES(1,$1,1)`, restrictedID); e != nil {
 			t.Fatal(e)
 		}
-		login := call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_id": 1})
-		expect(t, login, 200)
-		c := login.Result().Cookies()[0]
+		scopedLogin := call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_id": 1})
+		expect(t, scopedLogin, 200)
+		c := scopedLogin.Result().Cookies()[0]
 		scoped := c.Name + "=" + c.Value
 		expect(t, call("GET", "/api/assets?branch_id=2", scoped, nil), 403)
 		w := call("GET", "/api/assets", scoped, nil)
@@ -225,6 +355,14 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/assets", scoped, body), 201)
 		var localAsset int64
 		db.QueryRow(ctx, `SELECT id FROM assets WHERE tag='LOCAL-1' AND org_id=1`).Scan(&localAsset)
+		editBody := assetBody("LOCAL-1")
+		editBody["name"] = "Edited by operator"
+		editBody["version"] = 1
+		expect(t, call("POST", fmt.Sprintf("/api/assets/%d", localAsset), scoped, editBody), 200)
+		var protectedCost int64
+		if e := db.QueryRow(ctx, `SELECT purchase_cost FROM assets WHERE id=$1`, localAsset).Scan(&protectedCost); e != nil || protectedCost != 0 {
+			t.Fatalf("non-finance role changed protected cost: %d (%v)", protectedCost, e)
+		}
 		expect(t, call("POST", "/api/requests", scoped, map[string]any{"asset_id": localAsset, "kind": "transfer", "target_location_id": 2, "reason": "Cross branch", "version": 1}), 403)
 		body = assetBody("LOCAL-DENIED")
 		body["location_id"] = 2
@@ -260,6 +398,8 @@ func TestAPIIntegration(t *testing.T) {
 
 	t.Run("audited-export", func(t *testing.T) {
 		w := call("POST", "/api/exports/assets", auditor, map[string]any{"page": 1, "size": 25, "search": "", "status": "", "branch_id": 0})
+		expect(t, w, 403)
+		w = call("POST", "/api/exports/assets", finance, map[string]any{"page": 1, "size": 25, "search": "", "status": "", "branch_id": 0})
 		expect(t, w, 200)
 		if !strings.HasPrefix(w.Header().Get("Content-Type"), "text/csv") {
 			t.Fatal("not CSV")
@@ -270,8 +410,79 @@ func TestAPIIntegration(t *testing.T) {
 			t.Fatal("export not audited")
 		}
 	})
+	t.Run("soft-archive-and-restore", func(t *testing.T) {
+		body := assetBody("ARCHIVE-1")
+		expect(t, call("POST", "/api/assets", operator, body), 201)
+		var assetID int64
+		if e := db.QueryRow(ctx, `SELECT id FROM assets WHERE org_id=1 AND tag='ARCHIVE-1'`).Scan(&assetID); e != nil {
+			t.Fatal(e)
+		}
+		expect(t, call("DELETE", fmt.Sprintf("/api/assets/%d", assetID), admin, nil), 200)
+		var deleted bool
+		if e := db.QueryRow(ctx, `SELECT deleted_at IS NOT NULL FROM assets WHERE id=$1`, assetID).Scan(&deleted); e != nil || !deleted {
+			t.Fatalf("asset was not soft archived: %v (%v)", deleted, e)
+		}
+		expect(t, call("POST", fmt.Sprintf("/api/assets/%d/restore", assetID), admin, nil), 200)
+		if e := db.QueryRow(ctx, `SELECT deleted_at IS NULL FROM assets WHERE id=$1`, assetID).Scan(&deleted); e != nil || !deleted {
+			t.Fatalf("asset restore failed: %v (%v)", deleted, e)
+		}
+	})
+	t.Run("finance-lifecycle-and-compliance", func(t *testing.T) {
+		period := time.Now().In(financeZone).Format("2006-01")
+		periodKey := strings.ReplaceAll(period, "-", "")
+		body := assetBody("FINANCE-TEST")
+		expect(t, call("POST", "/api/assets", admin, body), 201)
+		var assetID int64
+		if e := db.QueryRow(ctx, `SELECT id FROM assets WHERE org_id=1 AND tag='FINANCE-TEST'`).Scan(&assetID); e != nil {
+			t.Fatal(e)
+		}
+
+		compliance := call("GET", "/api/reports/compliance?branch_id=1", admin, nil)
+		expect(t, compliance, 200)
+		var complianceBody map[string]any
+		if e := json.Unmarshal(compliance.Body.Bytes(), &complianceBody); e != nil || complianceBody["assets_active"] == nil {
+			t.Fatalf("compliance report response invalid: %s (%v)", compliance.Body.String(), e)
+		}
+		expect(t, call("GET", "/api/reports/compliance?branch_id=1", auditor, nil), 200)
+		expect(t, call("GET", "/api/finance/depreciation?period="+period+"&branch_id=1", manager, nil), 403)
+		expect(t, call("GET", "/api/finance/depreciation?period="+period+"&branch_id=1", finance, nil), 200)
+
+		proposal := map[string]any{"asset_id": assetID, "revalued_amount": 8_500_000, "remaining_life_months": 24, "reason": "Independent valuation"}
+		expect(t, call("POST", "/api/finance/valuations", finance, proposal), 201)
+		var valuationID int64
+		if e := db.QueryRow(ctx, `SELECT id FROM asset_valuations WHERE org_id=1 AND asset_id=$1 AND status='pending'`, assetID).Scan(&valuationID); e != nil {
+			t.Fatal(e)
+		}
+		decisionPath := fmt.Sprintf("/api/finance/valuations/%d/decision", valuationID)
+		expect(t, call("POST", decisionPath, finance, map[string]any{"approve": true}), 403)
+		expect(t, call("POST", decisionPath, admin, map[string]any{"approve": true}), 200)
+
+		accounts := map[string]string{"asset_account": "1500", "accumulated_depreciation_account": "1590", "depreciation_expense_account": "6000", "cash_account": "1100", "disposal_gain_account": "7990", "disposal_loss_account": "6990", "revaluation_reserve_account": "3100", "impairment_expense_account": "6900"}
+		expect(t, call("POST", "/api/finance/settings", finance, accounts), 200)
+		expect(t, call("GET", "/api/finance/settings", finance, nil), 200)
+		journals := call("GET", "/api/finance/journals?period="+period+"&branch_id=1", finance, nil)
+		expect(t, journals, 200)
+		if !strings.Contains(journals.Body.String(), "REVAL-FINANCE-TEST-"+periodKey) {
+			t.Fatalf("approved valuation missing from journal preview: %s", journals.Body.String())
+		}
+		journalCSV := call("POST", "/api/exports/journal", finance, map[string]any{"period": period, "branch_id": 1})
+		expect(t, journalCSV, 200)
+		if !strings.HasPrefix(journalCSV.Header().Get("Content-Type"), "text/csv") || !strings.Contains(journalCSV.Body.String(), "REVAL-FINANCE-TEST-"+periodKey) {
+			t.Fatalf("journal export invalid: %s", journalCSV.Body.String())
+		}
+
+		contract := map[string]any{"branch_id": 1, "asset_id": assetID, "name": "Presentation support", "vendor": "Demo Vendor", "contract_number": "SUP-001", "start_date": "2026-01-01", "end_date": "2027-01-01", "renewal_notice_days": 30, "annual_cost": 500_000}
+		expect(t, call("POST", "/api/contracts", manager, contract), 201)
+		managerContracts := call("GET", "/api/contracts?branch_id=1", manager, nil)
+		expect(t, managerContracts, 200)
+		if strings.Contains(managerContracts.Body.String(), "500000") {
+			t.Fatalf("contract finance fields leaked to manager: %s", managerContracts.Body.String())
+		}
+		financeContracts := call("GET", "/api/contracts?branch_id=1", finance, nil)
+		expect(t, financeContracts, 200)
+	})
 	t.Run("revoke-access-and-password", func(t *testing.T) {
-		expect(t, call("POST", "/api/users/3/access", admin, map[string]any{"role": "operator", "active": false, "all_branches": true, "branch_ids": []int64{}}), 200)
+		expect(t, call("POST", "/api/users/3/access", admin, map[string]any{"role": "operator", "active": false, "all_branches": false, "branch_ids": []int64{1}}), 200)
 		expect(t, call("GET", "/api/me", operator, nil), 401)
 		expect(t, call("POST", "/api/password", manager, map[string]any{"current_password": "test-password-123", "new_password": "changed-password-456"}), 200)
 		expect(t, call("GET", "/api/me", manager, nil), 401)

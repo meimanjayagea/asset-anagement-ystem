@@ -1,6 +1,8 @@
 const { chromium } = require("playwright");
 const path = require("node:path");
-const base = path.resolve(__dirname, "../../docs");
+const base = path.resolve(
+  process.env.SCREENSHOT_DIR || path.resolve(__dirname, "../../docs"),
+);
 const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
 (async () => {
   const browser = await chromium.launch({
@@ -14,9 +16,24 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     viewport: { width: 1440, height: 1040 },
   });
   const page = await context.newPage();
+  await context.addInitScript(() => localStorage.setItem("assetflow-locale", "en"));
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   let role = "admin";
+  const adminCapabilities = [
+    "dashboard.read", "assets.read", "assets.write", "assets.operate",
+    "assets.archive", "assets.finance", "assets.export", "requests.read",
+    "requests.create", "requests.decide", "maintenance.read", "maintenance.manage",
+    "stocktakes.read", "stocktakes.manage", "stocktakes.observe", "stocktakes.close",
+    "branches.read", "branches.manage", "locations.read", "locations.manage",
+    "locations.archive", "categories.read", "categories.manage", "categories.archive",
+    "users.read", "users.manage", "users.archive", "audit.read", "activity.read",
+    "assets.history", "contracts.read", "contracts.manage", "finance.read", "finance.manage",
+    "valuation.propose", "valuation.decide", "reports.read", "reports.export",
+  ];
+  const branchAdminCapabilities = adminCapabilities.filter(
+    (capability) => capability !== "branches.manage" && capability !== "users.manage_admin",
+  );
   let lastPost = null;
   let holdPath = "",
     onResponseHeld,
@@ -34,6 +51,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       location_id: 1,
       custodian: "",
       purchase_date: "2026-01-10",
+      supplier_name: "Example supplier",
+      acquisition_reference: "PO-2026-001",
+      depreciation_method: "straight_line",
+      depreciation_start_date: "2026-01-10",
       purchase_cost: 18000000,
       salvage_value: 1000000,
       book_value: 14812500,
@@ -53,6 +74,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       location_id: 2,
       custodian: "EMP-002 / Budi",
       purchase_date: "2025-01-10",
+      supplier_name: "Example supplier",
+      acquisition_reference: "PO-2025-002",
+      depreciation_method: "declining_balance",
+      depreciation_start_date: "2025-01-10",
       purchase_cost: 240000000,
       salvage_value: 40000000,
       book_value: 196250000,
@@ -72,6 +97,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       location_id: 1,
       custodian: "",
       purchase_date: "2024-01-10",
+      supplier_name: "Example supplier",
+      acquisition_reference: "PO-2024-003",
+      depreciation_method: "non_depreciable",
+      depreciation_start_date: "2024-01-10",
       purchase_cost: 12500000,
       salvage_value: 500000,
       book_value: 7000000,
@@ -89,7 +118,31 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     const req = route.request();
     const path = new URL(req.url()).pathname;
     let result = {};
-    if (req.method() === "POST") {
+    if (path === "/api/login/options")
+      result = {
+        organizations: [{
+          id: 1,
+          name: "Example Corp",
+          branches: [
+            { id: 1, code: "HQ", name: "Headquarters" },
+            { id: 2, code: "BDG", name: "Bandung" },
+          ],
+        }],
+      };
+    else if (path === "/api/user-roles")
+      result = [
+        { id: "admin", label: "Administrator Pusat" },
+        { id: "branch_admin", label: "Administrator Cabang" },
+        { id: "manager", label: "Manager" },
+        { id: "operator", label: "Operator" },
+        { id: "staff", label: "Staff" },
+        { id: "employee", label: "Karyawan" },
+        { id: "finance", label: "Finance" },
+        { id: "it_support", label: "IT Support" },
+        { id: "it_developer", label: "IT Developer" },
+        { id: "auditor", label: "Auditor" },
+      ];
+    else if (req.method() === "POST") {
       lastPost = { path, body: JSON.parse(req.postData() || "{}") };
       if (path === "/api/exports/assets") {
         await route.fulfill({
@@ -107,8 +160,20 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
         name: "Arya · Demo",
         email: "demo@example.com",
         role,
-        all_branches: role !== "auditor",
-        branch_ids: role === "auditor" ? [1] : [],
+        organization_name: "Example Corp",
+        all_branches: role === "admin",
+        branch_ids: role === "admin" ? [] : [1],
+        active_branch_id: role === "admin" ? 0 : 1,
+        capabilities:
+          role === "admin"
+            ? adminCapabilities
+            : role === "branch_admin"
+              ? branchAdminCapabilities
+            : [
+                "dashboard.read", "assets.read", "requests.read",
+                "maintenance.read", "stocktakes.read", "branches.read",
+                "locations.read", "categories.read",
+              ],
       };
     else if (path.endsWith("/dashboard"))
       result = {
@@ -181,7 +246,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
           useful_life_months: 48,
           maintenance_interval_days: 90,
           maintenance_instructions: "Inspect battery",
+          depreciation_method: "straight_line",
           version: 1,
+          branch_id: null,
+          branch_name: null,
         },
         {
           id: 2,
@@ -189,7 +257,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
           useful_life_months: 96,
           maintenance_interval_days: 180,
           maintenance_instructions: "Routine service",
+          depreciation_method: "declining_balance",
           version: 1,
+          branch_id: 1,
+          branch_name: "Jakarta",
         },
       ];
     else if (path.endsWith("/requests"))
@@ -259,6 +330,35 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
           created_at: "2026-10-07T09:00:00Z",
         },
       ];
+    else if (path === "/api/finance/valuations")
+      result = [
+        {
+          id: 1,
+          asset_id: 1,
+          name: "Lenovo ThinkPad T14",
+          tag: "AST-000001",
+          branch_code: "JKT",
+          effective_date: "2026-10-10",
+          revalued_amount: 19000000,
+          carrying_value_before: 14812500,
+          reason: "Presentation appraisal",
+          status: "pending",
+          requested_by: 1,
+        },
+        {
+          id: 2,
+          asset_id: 2,
+          name: "Toyota Avanza Operational",
+          tag: "AST-000002",
+          branch_code: "BDG",
+          effective_date: "2026-10-10",
+          revalued_amount: 210000000,
+          carrying_value_before: 196250000,
+          reason: "Independent appraisal",
+          status: "pending",
+          requested_by: 2,
+        },
+      ];
     else if (path.endsWith("/users"))
       result = [
         {
@@ -301,9 +401,28 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   await page.goto(baseURL);
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   await page.locator(".loading").waitFor({ state: "hidden" });
+  await page.locator("header .appearance-tools select").selectOption("id");
+  await page.getByRole("button", { name: "Daftar aset", exact: true }).waitFor();
+  await page.locator("header .appearance-tools select").selectOption("en");
+  await page.getByRole("button", { name: "Asset register", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Theme" }).click();
+  check((await page.locator("html").getAttribute("data-theme")) === "dark", "dark theme toggle");
+  const darkLabelContrast = await page.locator(".kpi.featured > span").evaluate((element) => {
+    const luminance = (color) => color.match(/\d+/g).slice(0, 3).map((channel) => {
+      const value = Number(channel) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    }).reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index], 0);
+    const foreground = luminance(getComputedStyle(element).color);
+    const background = luminance(getComputedStyle(element.parentElement).backgroundColor);
+    return (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05);
+  });
+  check(darkLabelContrast >= 4.5, "dark theme dashboard label contrast");
+  await page.screenshot({ path: base + "/dashboard-dark-demo.png", fullPage: true });
+  await page.getByRole("button", { name: "Theme" }).click();
+  check((await page.locator("html").getAttribute("data-theme")) === "light", "light theme restores");
   await page.screenshot({ path: base + "/dashboard-demo.png", fullPage: true });
   check(
-    (await page.getByText("Rp 270.500.000", { exact: true }).count()) === 1,
+    (await page.getByText(/270,500,000/).count()) === 1,
     "value rendering",
   );
   await page
@@ -313,9 +432,9 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     .getByRole("button", { name: "Register asset", exact: true })
     .waitFor();
   await page.getByRole("button", { name: "Assign", exact: true }).click();
-  await page.getByLabel("Nama / ID penanggung jawab").fill("EMP-100 / Arya");
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
-  await page.getByText("Perubahan berhasil disimpan").waitFor();
+  await page.getByLabel("Custodian name / ID").fill("EMP-100 / Arya");
+  await page.getByRole("button", { name: "Save & confirm" }).click();
+  await page.getByText("Changes saved successfully").waitFor();
   check(
     lastPost.path === "/api/assets/1/action" &&
       lastPost.body.version === 1 &&
@@ -328,11 +447,11 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   check((await page.getByLabel("Asset tag").count()) === 1, "register form");
   check(
     (await page
-      .getByLabel("Purchase cost (Rp)", { exact: true })
+      .getByLabel("Acquisition cost (IDR)", { exact: true })
       .getAttribute("step")) === "1",
     "integer monetary input",
   );
-  await page.getByRole("button", { name: "Batal", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.locator(".loading").waitFor({ state: "hidden" });
   await page.screenshot({
     path: base + "/asset-register-demo.png",
@@ -340,7 +459,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   });
   const downloadPromise = page.waitForEvent("download");
   await page
-    .getByRole("button", { name: "Export halaman CSV", exact: true })
+    .getByRole("button", { name: "Export page CSV", exact: true })
     .click();
   await downloadPromise;
   check(
@@ -350,7 +469,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   await page.getByRole("button", { name: /Approvals/ }).click();
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await page.getByLabel("Decision note").fill("Reviewed");
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
+  await page.getByRole("button", { name: "Save & confirm" }).click();
   check(
     lastPost.path === "/api/requests/1/decision" && lastPost.body.approve,
     "approval contract",
@@ -364,10 +483,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     (await page.getByText("Stocktake snapshot", { exact: true }).count()) === 1,
     "stocktake dialog",
   );
-  await page.getByRole("button", { name: "Batal", exact: true }).click();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await page.getByRole("button", { name: "Observe tag", exact: true }).click();
   await page.getByLabel("Asset tag", { exact: true }).fill("AST-000001");
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
+  await page.getByRole("button", { name: "Save & confirm" }).click();
   check(
     lastPost.body.tag === "AST-000001" &&
       lastPost.path === "/api/stocktakes/1/observe",
@@ -379,7 +498,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   await page.getByRole("button", { name: "Edit access", exact: true }).click();
   await page.getByRole("dialog").locator("select").selectOption("auditor");
   await page.getByLabel("Active account").uncheck();
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
+  await page.getByRole("button", { name: "Save & confirm" }).click();
   check(
     lastPost.body.role === "auditor" && !lastPost.body.active,
     "access contract",
@@ -390,10 +509,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     "existing user branch assignment preserved",
   );
   await page.getByRole("button", { name: "Branches", exact: true }).click();
-  await page.getByRole("button", { name: "Cabang", exact: true }).click();
+  await page.getByRole("button", { name: "Branch", exact: true }).click();
   await page.getByLabel("Code", { exact: true }).fill("SBY");
   await page.getByLabel("Name", { exact: true }).fill("Surabaya");
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
+  await page.getByRole("button", { name: "Save & confirm" }).click();
   check(
     lastPost.path === "/api/branches" && lastPost.body.code === "SBY",
     "branch creation contract",
@@ -404,7 +523,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     .first()
     .click();
   await page.getByLabel("Maintenance interval (days)").fill("120");
-  await page.getByRole("button", { name: "Simpan & konfirmasi" }).click();
+  await page.getByRole("button", { name: "Save & confirm" }).click();
   check(
     lastPost.path === "/api/categories/1/policy" &&
       lastPost.body.maintenance_interval_days === 120 &&
@@ -452,13 +571,31 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       (await page.getByText("IT Equipment", { exact: true }).count()) === 0,
     "stale response cannot overwrite navigation",
   );
+  await page.getByRole("button", { name: "Finance & reports", exact: true }).click();
+  await page.getByRole("tab", { name: "Revaluations" }).click();
+  await page.getByText("Independent appraisal", { exact: true }).waitFor();
+  check(
+    (await page.getByRole("button", { name: "Approve", exact: true }).count()) === 1,
+    "valuation proposer cannot approve their own request",
+  );
+  await page.getByRole("button", { name: "Propose valuation", exact: true }).click();
+  await page.locator(".finance-form select").selectOption("1");
+  await page.getByLabel("New value (IDR)").fill("19500000");
+  await page.getByLabel("Reason", { exact: true }).fill("Presentation condition review");
+  await page.getByRole("button", { name: "Propose valuation", exact: true }).last().click();
+  check(
+    lastPost.path === "/api/finance/valuations" &&
+      lastPost.body.revalued_amount === 19500000 &&
+      lastPost.body.asset_id === 1,
+    "valuation proposal contract",
+  );
   await page.locator(".loading").waitFor({ state: "hidden" });
   await page.locator(".toast").waitFor({ state: "hidden" });
   await page.screenshot({ path: base + "/activity-demo.png", fullPage: true });
   await page
     .getByRole("button", { name: "Asset register", exact: true })
     .click();
-  await page.getByLabel("Filter cabang").selectOption("1");
+  await page.getByLabel("Branch filter").selectOption("1");
   await page.locator(".loading").waitFor({ state: "hidden" });
   check(
     (await page
@@ -466,7 +603,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       .count()) === 0,
     "branch-filter rendering",
   );
-  await page.getByLabel("Filter cabang").selectOption("0");
+  await page.getByLabel("Branch filter").selectOption("0");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Overview", exact: true }).click();
   await page.locator(".loading").waitFor({ state: "hidden" });
@@ -496,11 +633,37 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     "auditor write hidden",
   );
   check(
-    (await page
-      .getByLabel("Filter cabang")
-      .locator('option[value="2"]')
-      .count()) === 0,
-    "auditor foreign branch hidden",
+    (await page.getByLabel("Branch filter").count()) === 0,
+    "single-branch filter hidden",
+  );
+  role = "branch_admin";
+  await page.reload();
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Categories", exact: true }).click();
+  await page.getByText("Vehicles", { exact: true }).waitFor();
+  check(
+    (await page.getByRole("button", { name: "Category", exact: true }).count()) === 1,
+    "branch admin can create local categories",
+  );
+  check(
+    (await page.getByRole("button", { name: "Edit policy", exact: true }).count()) === 1,
+    "branch admin can edit local policy but not shared catalog",
+  );
+  await page.getByRole("button", { name: "Category", exact: true }).click();
+  await page.getByLabel("Name", { exact: true }).fill("Branch-only devices");
+  await page.getByRole("button", { name: "Save & confirm" }).click();
+  check(
+    lastPost.path === "/api/categories" && lastPost.body.branch_id === 1,
+    "branch category creation carries local scope",
+  );
+  await page.getByRole("button", { name: "Asset register", exact: true }).click();
+  await page.getByText("Lenovo ThinkPad T14", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.getByLabel("Name", { exact: true }).fill("Branch-updated laptop");
+  await page.getByRole("button", { name: "Save & confirm" }).click();
+  check(
+    lastPost.path === "/api/assets/1" && lastPost.body.version === 1,
+    "branch asset edit sends version guard",
   );
   check(errors.length === 0, "no runtime errors");
   console.log(

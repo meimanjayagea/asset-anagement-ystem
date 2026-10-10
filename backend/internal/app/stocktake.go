@@ -9,7 +9,7 @@ import (
 
 func (s *Server) listStocktakes(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
-	return s.rows(w, r, `SELECT s.id,s.title,s.status,l.name AS location_name,s.created_at,s.closed_at,l.branch_id,count(i.asset_id)::int AS expected,count(i.asset_id) FILTER(WHERE i.observed)::int AS observed,count(i.asset_id) FILTER(WHERE NOT i.observed)::int AS missing FROM stocktakes s JOIN locations l ON l.id=s.location_id LEFT JOIN stocktake_items i ON i.stocktake_id=s.id WHERE s.org_id=$1 AND can_access_branch(s.org_id,$4,l.branch_id) AND ($5::bigint=0 OR l.branch_id=$5) GROUP BY s.id,l.name,l.branch_id ORDER BY s.id DESC LIMIT $2 OFFSET $3`, actor(r).OrgID, z, (p-1)*z, actor(r).ID, selectedBranch(r))
+	return s.rows(w, r, `SELECT s.id,s.title,s.status,l.name AS location_name,s.created_at,s.closed_at,l.branch_id,count(i.asset_id)::int AS expected,count(i.asset_id) FILTER(WHERE i.observed)::int AS observed,count(i.asset_id) FILTER(WHERE NOT i.observed)::int AS missing FROM stocktakes s JOIN locations l ON l.id=s.location_id LEFT JOIN stocktake_items i ON i.stocktake_id=s.id WHERE s.org_id=$1 AND l.deleted_at IS NULL AND can_access_branch(s.org_id,$4,l.branch_id) AND ($5::bigint=0 OR l.branch_id=$5) GROUP BY s.id,l.name,l.branch_id ORDER BY s.id DESC LIMIT $2 OFFSET $3`, actor(r).OrgID, z, (p-1)*z, actor(r).ID, selectedBranch(r))
 }
 func (s *Server) createStocktake(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
@@ -33,7 +33,7 @@ func (s *Server) createStocktake(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(r.Context(), `INSERT INTO stocktake_items(org_id,stocktake_id,asset_id,expected_version,expected_tag) SELECT org_id,$1,id,version,tag FROM assets WHERE org_id=$2 AND location_id=$3 AND status<>'disposed'`, n, u.OrgID, in.Location)
+		_, e = tx.Exec(r.Context(), `INSERT INTO stocktake_items(org_id,stocktake_id,asset_id,expected_version,expected_tag) SELECT a.org_id,$1,a.id,a.version,a.tag FROM assets a JOIN locations l ON l.id=a.location_id WHERE a.org_id=$2 AND a.location_id=$3 AND a.deleted_at IS NULL AND l.deleted_at IS NULL AND a.status<>'disposed'`, n, u.OrgID, in.Location)
 		if e != nil {
 			return e
 		}
@@ -51,7 +51,7 @@ func (s *Server) stocktakeItems(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	p, z := page(r)
-	return s.rows(w, r, `SELECT i.asset_id,i.expected_tag,a.name,i.observed,i.notes,i.expected_version,a.version AS current_version,a.location_id AS current_location_id,a.status AS current_status,i.observed_at FROM stocktake_items i JOIN assets a ON a.id=i.asset_id JOIN stocktakes st ON st.id=i.stocktake_id JOIN locations l ON l.id=st.location_id WHERE i.org_id=$1 AND i.stocktake_id=$2 AND can_access_branch(i.org_id,$5,l.branch_id) ORDER BY i.expected_tag LIMIT $3 OFFSET $4`, actor(r).OrgID, n, z, (p-1)*z, actor(r).ID)
+	return s.rows(w, r, `SELECT i.asset_id,i.expected_tag,a.name,i.observed,i.notes,i.expected_version,a.version AS current_version,a.location_id AS current_location_id,a.status AS current_status,i.observed_at FROM stocktake_items i JOIN assets a ON a.id=i.asset_id JOIN stocktakes st ON st.id=i.stocktake_id JOIN locations l ON l.id=st.location_id WHERE i.org_id=$1 AND i.stocktake_id=$2 AND a.deleted_at IS NULL AND l.deleted_at IS NULL AND can_access_branch(i.org_id,$5,l.branch_id) ORDER BY i.expected_tag LIMIT $3 OFFSET $4`, actor(r).OrgID, n, z, (p-1)*z, actor(r).ID)
 }
 func (s *Server) observeStocktake(w http.ResponseWriter, r *http.Request) error {
 	n, e := id(r)
@@ -131,7 +131,7 @@ func (s *Server) closeStocktake(w http.ResponseWriter, r *http.Request) error {
 			return fail(409, "Stocktake sudah ditutup")
 		}
 		var missing, changed int
-		e = tx.QueryRow(r.Context(), `SELECT count(*) FILTER(WHERE NOT i.observed),count(*) FILTER(WHERE i.expected_version<>a.version) FROM stocktake_items i JOIN assets a ON a.id=i.asset_id WHERE i.org_id=$1 AND i.stocktake_id=$2`, u.OrgID, n).Scan(&missing, &changed)
+		e = tx.QueryRow(r.Context(), `SELECT count(*) FILTER(WHERE NOT i.observed),count(*) FILTER(WHERE i.expected_version<>a.version) FROM stocktake_items i JOIN assets a ON a.id=i.asset_id WHERE i.org_id=$1 AND i.stocktake_id=$2 AND a.deleted_at IS NULL`, u.OrgID, n).Scan(&missing, &changed)
 		if e != nil {
 			return e
 		}

@@ -29,4 +29,3 @@ The frontend currently calls same-origin `/api` and `/health` paths. Add
 frontend rewrites to the backend only after its database, schema, and health
 endpoint are ready. Keep the database connection pool's total across scaled
 instances within the provider's connection limit.
-

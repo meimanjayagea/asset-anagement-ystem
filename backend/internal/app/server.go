@@ -34,13 +34,16 @@ type attempt struct {
 	Reset time.Time
 }
 type User struct {
-	ID          int64   `json:"id"`
-	OrgID       int64   `json:"org_id"`
-	Name        string  `json:"name"`
-	Email       string  `json:"email"`
-	Role        string  `json:"role"`
-	AllBranches bool    `json:"all_branches"`
-	BranchIDs   []int64 `json:"branch_ids"`
+	ID             int64    `json:"id"`
+	OrgID          int64    `json:"org_id"`
+	Organization   string   `json:"organization_name"`
+	Name           string   `json:"name"`
+	Email          string   `json:"email"`
+	Role           string   `json:"role"`
+	AllBranches    bool     `json:"all_branches"`
+	BranchIDs      []int64  `json:"branch_ids"`
+	ActiveBranchID int64    `json:"active_branch_id"`
+	Capabilities   []string `json:"capabilities"`
 }
 type ctxKey struct{}
 type apiError struct {
@@ -115,44 +118,70 @@ func (s *Server) Routes() http.Handler {
 		}
 		write(w, 200, map[string]string{"status": "ok"})
 	})
+	m.HandleFunc("GET /api/login/options", s.loginOptions)
 	m.HandleFunc("POST /api/login", s.login)
-	add := func(pattern, roles string, h func(http.ResponseWriter, *http.Request) error) {
-		m.Handle(pattern, s.auth(roles, h))
+	add := func(pattern, capability string, h func(http.ResponseWriter, *http.Request) error) {
+		m.Handle(pattern, s.auth(capability, h))
 	}
 	add("GET /api/me", "", func(w http.ResponseWriter, r *http.Request) error { write(w, 200, actor(r)); return nil })
 	add("POST /api/logout", "", s.logout)
-	add("GET /api/dashboard", "", s.dashboard)
-	add("GET /api/assets", "", s.listAssets)
-	add("POST /api/assets", "admin,manager,operator", s.createAsset)
-	add("POST /api/assets/{id}/action", "admin,manager,operator", s.assetAction)
-	add("GET /api/locations", "", s.listLocations)
-	add("POST /api/locations", "admin,manager", s.createLocation)
-	add("GET /api/categories", "", s.listCategories)
-	add("POST /api/categories", "admin,manager", s.createCategory)
-	add("GET /api/requests", "", s.listRequests)
-	add("POST /api/requests", "admin,manager,operator", s.createRequest)
-	add("POST /api/requests/{id}/decision", "admin,manager", s.decideRequest)
-	add("GET /api/maintenance", "", s.listMaintenance)
-	add("POST /api/maintenance", "admin,manager,operator", s.createMaintenance)
-	add("POST /api/maintenance/{id}/action", "admin,manager,operator", s.maintenanceAction)
-	add("GET /api/audit", "admin,manager,auditor", s.auditList)
-	add("GET /api/users", "admin", s.listUsers)
-	add("POST /api/users", "admin", s.createUser)
-	add("GET /api/stocktakes", "", s.listStocktakes)
-	add("POST /api/stocktakes", "admin,manager,operator", s.createStocktake)
-	add("GET /api/stocktakes/{id}/items", "", s.stocktakeItems)
-	add("POST /api/stocktakes/{id}/observe", "admin,manager,operator", s.observeStocktake)
-	add("POST /api/stocktakes/{id}/close", "admin,manager", s.closeStocktake)
+	add("GET /api/dashboard", "dashboard.read", s.dashboard)
+	add("GET /api/assets", "assets.read", s.listAssets)
+	add("GET /api/assets/{id}/history", "assets.history", s.assetHistory)
+	add("POST /api/assets", "assets.write", s.createAsset)
+	add("POST /api/assets/{id}", "assets.write", s.updateAsset)
+	add("POST /api/assets/{id}/action", "assets.operate", s.assetAction)
+	add("DELETE /api/assets/{id}", "assets.archive", s.archiveAsset)
+	add("POST /api/assets/{id}/restore", "assets.archive", s.restoreAsset)
+	add("GET /api/locations", "locations.read", s.listLocations)
+	add("POST /api/locations", "locations.manage", s.createLocation)
+	add("DELETE /api/locations/{id}", "locations.archive", s.archiveLocation)
+	add("POST /api/locations/{id}/restore", "locations.archive", s.restoreLocation)
+	add("GET /api/categories", "categories.read", s.listCategories)
+	add("POST /api/categories", "categories.manage", s.createCategory)
+	add("DELETE /api/categories/{id}", "categories.archive", s.archiveCategory)
+	add("POST /api/categories/{id}/restore", "categories.archive", s.restoreCategory)
+	add("GET /api/requests", "requests.read", s.listRequests)
+	add("POST /api/requests", "requests.create", s.createRequest)
+	add("POST /api/requests/{id}/decision", "requests.decide", s.decideRequest)
+	add("GET /api/maintenance", "maintenance.read", s.listMaintenance)
+	add("POST /api/maintenance", "maintenance.manage", s.createMaintenance)
+	add("POST /api/maintenance/{id}/action", "maintenance.manage", s.maintenanceAction)
+	add("GET /api/audit", "audit.read", s.auditList)
+	add("GET /api/users", "users.read", s.listUsers)
+	add("POST /api/users", "users.manage", s.createUser)
+	add("GET /api/user-roles", "users.manage", s.listAssignableRoles)
+	add("POST /api/users/{id}/access", "users.manage", s.updateUserAccess)
+	add("DELETE /api/users/{id}", "users.archive", s.archiveUser)
+	add("POST /api/users/{id}/restore", "users.archive", s.restoreUser)
+	add("GET /api/stocktakes", "stocktakes.read", s.listStocktakes)
+	add("POST /api/stocktakes", "stocktakes.manage", s.createStocktake)
+	add("GET /api/stocktakes/{id}/items", "stocktakes.read", s.stocktakeItems)
+	add("POST /api/stocktakes/{id}/observe", "stocktakes.observe", s.observeStocktake)
+	add("POST /api/stocktakes/{id}/close", "stocktakes.close", s.closeStocktake)
 	add("POST /api/password", "", s.changePassword)
-	add("POST /api/users/{id}/access", "admin", s.updateUserAccess)
-	add("GET /api/branches", "", s.listBranches)
-	add("POST /api/branches", "admin", s.createBranch)
-	add("POST /api/exports/assets", "", s.exportAssets)
-	add("GET /api/activity", "admin,manager,auditor", s.listActivity)
-	add("POST /api/categories/{id}/policy", "admin", s.categoryPolicy)
+	add("GET /api/branches", "branches.read", s.listBranches)
+	add("POST /api/branches", "branches.manage", s.createBranch)
+	add("DELETE /api/branches/{id}", "branches.manage", s.archiveBranch)
+	add("POST /api/branches/{id}/restore", "branches.manage", s.restoreBranch)
+	add("POST /api/exports/assets", "assets.export", s.exportAssets)
+	add("GET /api/activity", "activity.read", s.listActivity)
+	add("POST /api/categories/{id}/policy", "categories.manage", s.categoryPolicy)
+	add("GET /api/contracts", "contracts.read", s.listContracts)
+	add("POST /api/contracts", "contracts.manage", s.createContract)
+	add("DELETE /api/contracts/{id}", "contracts.manage", s.archiveContract)
+	add("GET /api/finance/settings", "finance.read", s.accountingSettings)
+	add("POST /api/finance/settings", "finance.manage", s.accountingSettings)
+	add("GET /api/finance/valuations", "valuation.propose", s.valuations)
+	add("POST /api/finance/valuations", "valuation.propose", s.valuations)
+	add("POST /api/finance/valuations/{id}/decision", "valuation.decide", s.decideValuation)
+	add("GET /api/finance/depreciation", "finance.read", s.depreciationReport)
+	add("GET /api/finance/journals", "finance.read", s.journalPreview)
+	add("POST /api/exports/journal", "reports.export", s.exportJournal)
+	add("GET /api/reports/compliance", "reports.read", s.complianceReport)
 	return s.middleware(m)
 }
-func (s *Server) auth(roles string, h func(http.ResponseWriter, *http.Request) error) http.Handler {
+func (s *Server) auth(capability string, h func(http.ResponseWriter, *http.Request) error) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, e := r.Cookie("assetflow_session")
 		if e != nil {
@@ -160,7 +189,7 @@ func (s *Server) auth(roles string, h func(http.ResponseWriter, *http.Request) e
 			return
 		}
 		var u User
-		e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,u.name,u.email,u.role,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id=u.id ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active`, hash(c.Value)).Scan(&u.ID, &u.OrgID, &u.Name, &u.Email, &u.Role, &u.AllBranches, &u.BranchIDs)
+		e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.role,u.all_branches,s.active_branch_id,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.org_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active AND u.deleted_at IS NULL`, hash(c.Value)).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.Role, &u.AllBranches, &u.ActiveBranchID, &u.BranchIDs)
 		if e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				report(w, fail(401, "Sesi berakhir"))
@@ -169,7 +198,11 @@ func (s *Server) auth(roles string, h func(http.ResponseWriter, *http.Request) e
 			}
 			return
 		}
+		u.Capabilities = capabilitiesForRole(u.Role)
 		meta(r.Context()).User = &u
+		if u.ActiveBranchID > 0 {
+			meta(r.Context()).Branch = &u.ActiveBranchID
+		}
 		if raw := r.URL.Query().Get("branch_id"); raw != "" {
 			branch, e := strconvBranch(raw)
 			if e != nil || branch < 0 {
@@ -190,7 +223,7 @@ func (s *Server) auth(roles string, h func(http.ResponseWriter, *http.Request) e
 				}
 			}
 		}
-		if roles != "" && !strings.Contains(","+roles+",", ","+u.Role+",") {
+		if capability != "" && !hasCapability(u.Role, capability) {
 			report(w, fail(403, "Akses ditolak"))
 			return
 		}
@@ -199,11 +232,52 @@ func (s *Server) auth(roles string, h func(http.ResponseWriter, *http.Request) e
 		}
 	})
 }
+func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
+	rows, e := s.DB.Query(r.Context(), `SELECT o.id,o.name,b.id,b.code,b.name FROM organizations o JOIN branches b ON b.org_id=o.id AND b.deleted_at IS NULL ORDER BY o.id,b.code`)
+	if e != nil {
+		report(w, e)
+		return
+	}
+	defer rows.Close()
+	type branchOption struct {
+		ID   int64  `json:"id"`
+		Code string `json:"code"`
+		Name string `json:"name"`
+	}
+	type organizationOption struct {
+		ID       int64          `json:"id"`
+		Name     string         `json:"name"`
+		Branches []branchOption `json:"branches"`
+	}
+	orgs := []organizationOption{}
+	indexes := map[int64]int{}
+	for rows.Next() {
+		var orgID, branchID int64
+		var orgName, code, branchName string
+		if e = rows.Scan(&orgID, &orgName, &branchID, &code, &branchName); e != nil {
+			report(w, e)
+			return
+		}
+		index, ok := indexes[orgID]
+		if !ok {
+			index = len(orgs)
+			indexes[orgID] = index
+			orgs = append(orgs, organizationOption{ID: orgID, Name: orgName, Branches: []branchOption{}})
+		}
+		orgs[index].Branches = append(orgs[index].Branches, branchOption{ID: branchID, Code: code, Name: branchName})
+	}
+	if e = rows.Err(); e != nil {
+		report(w, e)
+		return
+	}
+	write(w, 200, map[string]any{"organizations": orgs})
+}
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 		OrgID    int64  `json:"org_id"`
+		BranchID int64  `json:"branch_id"`
 	}
 	if e := decode(w, r, &in); e != nil {
 		report(w, e)
@@ -211,11 +285,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
 	meta(r.Context()).LoginOrg = in.OrgID
+	if in.BranchID > 0 {
+		meta(r.Context()).Branch = &in.BranchID
+	}
 	meta(r.Context()).EmailHash = hash(in.Email)
 	if len(in.Email) <= 254 {
 		meta(r.Context()).AttemptedEmail = in.Email
 	}
-	if len(in.Email) < 3 || len(in.Email) > 254 || len(in.Password) < 1 || len(in.Password) > 72 || in.OrgID < 1 {
+	if len(in.Email) < 3 || len(in.Email) > 254 || len(in.Password) < 1 || len(in.Password) > 72 || in.OrgID < 1 || in.BranchID < 0 {
 		report(w, fail(422, "Kredensial tidak valid"))
 		return
 	}
@@ -247,12 +324,39 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var u User
 	var pw string
-	e := s.DB.QueryRow(r.Context(), `SELECT id,org_id,name,email,role,password_hash,all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub WHERE ub.user_id=users.id ORDER BY ub.branch_id) FROM users WHERE org_id=$1 AND email=$2 AND active`, in.OrgID, in.Email).Scan(&u.ID, &u.OrgID, &u.Name, &u.Email, &u.Role, &pw, &u.AllBranches, &u.BranchIDs)
+	e := s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.role,u.password_hash,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.org_id=$1 AND u.email=$2 AND u.active AND u.deleted_at IS NULL`, in.OrgID, in.Email).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.Role, &pw, &u.AllBranches, &u.BranchIDs)
 	if e != nil || bcrypt.CompareHashAndPassword([]byte(pw), []byte(in.Password)) != nil {
 		report(w, fail(401, "Kredensial tidak valid"))
 		return
 	}
+	u.Capabilities = capabilitiesForRole(u.Role)
+	u.ActiveBranchID = in.BranchID
+	if u.ActiveBranchID > 0 {
+		var allowed bool
+		e = s.DB.QueryRow(r.Context(), `SELECT can_access_branch($1,$2,$3)`, u.OrgID, u.ID, u.ActiveBranchID).Scan(&allowed)
+		if e != nil {
+			report(w, e)
+			return
+		}
+		if !allowed {
+			u.ActiveBranchID = 0
+		}
+	}
+	if !u.AllBranches && u.ActiveBranchID == 0 {
+		e = s.DB.QueryRow(r.Context(), `SELECT COALESCE(min(b.id),0) FROM branches b JOIN user_branches ub ON ub.branch_id=b.id AND ub.org_id=b.org_id WHERE ub.org_id=$1 AND ub.user_id=$2 AND b.deleted_at IS NULL AND can_access_branch($1,$2,b.id)`, u.OrgID, u.ID).Scan(&u.ActiveBranchID)
+		if e != nil {
+			report(w, e)
+			return
+		}
+		if u.ActiveBranchID == 0 {
+			report(w, fail(401, "Kredensial tidak valid"))
+			return
+		}
+	}
 	meta(r.Context()).User = &u
+	if u.ActiveBranchID > 0 {
+		meta(r.Context()).Branch = &u.ActiveBranchID
+	}
 	t, e := token()
 	if e != nil {
 		report(w, e)
@@ -266,7 +370,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	_, e = tx.Exec(r.Context(), `DELETE FROM sessions WHERE expires_at<now()`)
 	if e == nil {
-		_, e = tx.Exec(r.Context(), `INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '8 hours')`, hash(t), u.ID)
+		_, e = tx.Exec(r.Context(), `INSERT INTO sessions(token_hash,user_id,expires_at,active_branch_id) VALUES($1,$2,now()+interval '8 hours',$3)`, hash(t), u.ID, u.ActiveBranchID)
 	}
 	if e == nil {
 		e = logAudit(r.Context(), tx, u, "login", "user", u.ID, nil, map[string]any{"email": u.Email})
@@ -303,6 +407,8 @@ func logAudit(c context.Context, tx pgx.Tx, u User, action, entity string, id in
 		query = `SELECT l.branch_id FROM assets a JOIN locations l ON l.id=a.location_id WHERE a.org_id=$1 AND a.id=$2`
 	case "location":
 		query = `SELECT branch_id FROM locations WHERE org_id=$1 AND id=$2`
+	case "category":
+		query = `SELECT COALESCE(branch_id,0) FROM categories WHERE org_id=$1 AND id=$2`
 	case "request":
 		query = `SELECT source_branch_id FROM requests WHERE org_id=$1 AND id=$2`
 	case "maintenance":
@@ -311,6 +417,10 @@ func logAudit(c context.Context, tx pgx.Tx, u User, action, entity string, id in
 		query = `SELECT l.branch_id FROM stocktakes s JOIN locations l ON l.id=s.location_id WHERE s.org_id=$1 AND s.id=$2`
 	case "asset_export":
 		branch = m.Branch
+	case "contract":
+		query = `SELECT branch_id FROM service_contracts WHERE org_id=$1 AND id=$2`
+	case "valuation":
+		query = `SELECT branch_id FROM asset_valuations WHERE org_id=$1 AND id=$2`
 	case "branch":
 		branch = &id
 	}
@@ -319,7 +429,9 @@ func logAudit(c context.Context, tx pgx.Tx, u User, action, entity string, id in
 		if e := tx.QueryRow(c, query, u.OrgID, id).Scan(&v); e != nil {
 			return e
 		}
-		branch = &v
+		if v > 0 {
+			branch = &v
+		}
 	}
 	if entity == "asset" && action == "transfer" {
 		related = branch
@@ -335,6 +447,9 @@ func logAudit(c context.Context, tx pgx.Tx, u User, action, entity string, id in
 		if e := tx.QueryRow(c, `SELECT target_branch_id FROM requests WHERE org_id=$1 AND id=$2`, u.OrgID, id).Scan(&related); e != nil {
 			return e
 		}
+	}
+	if branch == nil {
+		branch = m.Branch
 	}
 	if branch != nil {
 		m.Branch = branch

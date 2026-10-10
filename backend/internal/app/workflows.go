@@ -10,22 +10,26 @@ import (
 
 func (s *Server) listRequests(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
-	return s.rows(w, r, `SELECT r.id,r.asset_id,a.tag,a.name,r.kind,r.reason,r.status,r.expected_version,r.target_location_id,l.name AS target_location,r.requested_by,u.name AS requester,r.decision_note,r.created_at,r.source_branch_id,r.target_branch_id FROM requests r JOIN assets a ON a.id=r.asset_id LEFT JOIN locations l ON l.id=r.target_location_id JOIN users u ON u.id=r.requested_by WHERE r.org_id=$1 AND can_access_branch(r.org_id,$4,r.source_branch_id) AND ($5::bigint=0 OR r.source_branch_id=$5) ORDER BY r.id DESC LIMIT $2 OFFSET $3`, actor(r).OrgID, z, (p-1)*z, actor(r).ID, selectedBranch(r))
+	return s.rows(w, r, `SELECT r.id,r.asset_id,a.tag,a.name,r.kind,r.reason,r.status,r.expected_version,r.target_location_id,l.name AS target_location,r.requested_by,u.name AS requester,r.decision_note,r.created_at,r.source_branch_id,r.target_branch_id,CASE WHEN $6::boolean THEN r.disposal_proceeds ELSE NULL END AS disposal_proceeds FROM requests r JOIN assets a ON a.id=r.asset_id LEFT JOIN locations l ON l.id=r.target_location_id JOIN users u ON u.id=r.requested_by WHERE r.org_id=$1 AND a.deleted_at IS NULL AND can_access_branch(r.org_id,$4,r.source_branch_id) AND ($5::bigint=0 OR r.source_branch_id=$5) ORDER BY r.id DESC LIMIT $2 OFFSET $3`, actor(r).OrgID, z, (p-1)*z, actor(r).ID, selectedBranch(r), hasCapability(actor(r).Role, "assets.finance"))
 }
 func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Asset   int64  `json:"asset_id"`
-		Kind    string `json:"kind"`
-		Target  *int64 `json:"target_location_id"`
-		Reason  string `json:"reason"`
-		Version int    `json:"version"`
+		Asset    int64  `json:"asset_id"`
+		Kind     string `json:"kind"`
+		Target   *int64 `json:"target_location_id"`
+		Reason   string `json:"reason"`
+		Proceeds int64  `json:"disposal_proceeds"`
+		Version  int    `json:"version"`
 	}
 	if e := decode(w, r, &in); e != nil {
 		return e
 	}
 	in.Reason = strings.TrimSpace(in.Reason)
-	if len(in.Reason) < 3 || len(in.Reason) > 1000 || (in.Kind != "transfer" && in.Kind != "dispose") || (in.Kind == "transfer" && in.Target == nil) || (in.Kind == "dispose" && in.Target != nil) {
+	if len(in.Reason) < 3 || len(in.Reason) > 1000 || in.Proceeds < 0 || in.Proceeds > 1_000_000_000_000_000 || (in.Kind != "transfer" && in.Kind != "dispose") || (in.Kind == "transfer" && (in.Target == nil || in.Proceeds != 0)) || (in.Kind == "dispose" && in.Target != nil) {
 		return fail(422, "Request tidak valid")
+	}
+	if in.Kind == "dispose" && in.Proceeds > 0 && !hasCapability(actor(r).Role, "assets.finance") {
+		return fail(403, "Nilai hasil disposal hanya dapat dicatat oleh role finance")
 	}
 	var n int64
 	e := s.transaction(r, func(tx pgx.Tx) error {
@@ -55,7 +59,7 @@ func (s *Server) createRequest(w http.ResponseWriter, r *http.Request) error {
 		if active {
 			return fail(409, "Maintenance aktif")
 		}
-		e = tx.QueryRow(r.Context(), `INSERT INTO requests(org_id,asset_id,kind,target_location_id,reason,expected_version,requested_by,source_branch_id,target_branch_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT branch_id FROM locations WHERE org_id=$1 AND id=$4)) RETURNING id`, actor(r).OrgID, in.Asset, in.Kind, in.Target, in.Reason, in.Version, actor(r).ID, a.BranchID).Scan(&n)
+		e = tx.QueryRow(r.Context(), `INSERT INTO requests(org_id,asset_id,kind,target_location_id,reason,expected_version,requested_by,source_branch_id,target_branch_id,disposal_proceeds) VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT branch_id FROM locations WHERE org_id=$1 AND id=$4),$9) RETURNING id`, actor(r).OrgID, in.Asset, in.Kind, in.Target, in.Reason, in.Version, actor(r).ID, a.BranchID, in.Proceeds).Scan(&n)
 		if e != nil {
 			return e
 		}
@@ -88,6 +92,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request) error {
 		var kind, status string
 		var target *int64
 		var version int
+		var proceeds int64
 		// Discover asset, then take asset lock before request lock in every write path.
 		e := tx.QueryRow(r.Context(), `SELECT asset_id FROM requests WHERE org_id=$1 AND id=$2`, u.OrgID, n).Scan(&asset)
 		if errors.Is(e, pgx.ErrNoRows) {
@@ -100,7 +105,7 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request) error {
 		if e != nil {
 			return e
 		}
-		e = tx.QueryRow(r.Context(), `SELECT kind,status,target_location_id,expected_version,requested_by FROM requests WHERE org_id=$1 AND id=$2 FOR UPDATE`, u.OrgID, n).Scan(&kind, &status, &target, &version, &requester)
+		e = tx.QueryRow(r.Context(), `SELECT kind,status,target_location_id,expected_version,requested_by,disposal_proceeds FROM requests WHERE org_id=$1 AND id=$2 FOR UPDATE`, u.OrgID, n).Scan(&kind, &status, &target, &version, &requester, &proceeds)
 		if e != nil {
 			return e
 		}
@@ -123,8 +128,25 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request) error {
 			result = "approved"
 			if kind == "transfer" {
 				_, e = tx.Exec(r.Context(), `UPDATE assets SET location_id=$1,version=version+1,updated_at=now() WHERE org_id=$2 AND id=$3`, target, u.OrgID, asset)
+				if e == nil {
+					var targetBranch int64
+					if e = tx.QueryRow(r.Context(), `SELECT branch_id FROM locations WHERE org_id=$1 AND id=$2`, u.OrgID, *target).Scan(&targetBranch); e == nil {
+						fromLocation, toLocation := a.Location, *target
+						fromBranch, toBranch := a.BranchID, targetBranch
+						e = recordAssetMovement(r.Context(), tx, u, asset, "transferred", &fromLocation, &toLocation, &fromBranch, &toBranch, a.Custodian, a.Custodian, in.Note)
+					}
+				}
 			} else {
-				_, e = tx.Exec(r.Context(), `UPDATE assets SET status='disposed',next_maintenance_date=NULL,version=version+1,updated_at=now() WHERE org_id=$1 AND id=$2`, u.OrgID, asset)
+				today := time.Now().In(time.FixedZone("WIB", 7*3600))
+				book, gross, accumulated, calcErr := assetBookValueAt(r.Context(), tx, u.OrgID, a, today)
+				if calcErr != nil {
+					return calcErr
+				}
+				_, e = tx.Exec(r.Context(), `UPDATE assets SET status='disposed',disposed_at=now(),disposal_proceeds=$1,disposal_book_value=$2,disposal_gross_value=$3,disposal_accumulated_depreciation=$4,next_maintenance_date=NULL,version=version+1,updated_at=now() WHERE org_id=$5 AND id=$6`, proceeds, book, gross, accumulated, u.OrgID, asset)
+				if e == nil {
+					fromLocation, fromBranch := a.Location, a.BranchID
+					e = recordAssetMovement(r.Context(), tx, u, asset, "disposed", &fromLocation, nil, &fromBranch, nil, a.Custodian, "", in.Note)
+				}
 			}
 			if e != nil {
 				return e
@@ -147,7 +169,8 @@ func (s *Server) decideRequest(w http.ResponseWriter, r *http.Request) error {
 }
 func (s *Server) listMaintenance(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
-	return s.rows(w, r, `SELECT m.id,m.asset_id,a.tag,a.name,m.title,m.due_date::text,m.status,m.cost,m.notes,m.completed_at,a.version AS asset_version,m.branch_id,b.name AS branch_name,c.maintenance_instructions FROM maintenance m JOIN assets a ON a.id=m.asset_id JOIN branches b ON b.id=m.branch_id JOIN categories c ON c.id=a.category_id WHERE m.org_id=$1 AND can_access_branch(m.org_id,$4,m.branch_id) AND ($5::bigint=0 OR m.branch_id=$5) ORDER BY m.id DESC LIMIT $2 OFFSET $3`, actor(r).OrgID, z, (p-1)*z, actor(r).ID, selectedBranch(r))
+	u := actor(r)
+	return s.rows(w, r, `SELECT m.id,m.asset_id,a.tag,a.name,m.title,m.due_date::text,m.status,CASE WHEN $6::boolean THEN m.cost ELSE NULL END AS cost,m.notes,m.completed_at,a.version AS asset_version,m.branch_id,b.name AS branch_name,c.maintenance_instructions FROM maintenance m JOIN assets a ON a.id=m.asset_id JOIN branches b ON b.id=m.branch_id JOIN categories c ON c.id=a.category_id WHERE m.org_id=$1 AND a.deleted_at IS NULL AND b.deleted_at IS NULL AND c.deleted_at IS NULL AND can_access_branch(m.org_id,$4,m.branch_id) AND ($5::bigint=0 OR m.branch_id=$5) ORDER BY m.id DESC LIMIT $2 OFFSET $3`, u.OrgID, z, (p-1)*z, u.ID, selectedBranch(r), hasCapability(u.Role, "assets.finance"))
 }
 func (s *Server) createMaintenance(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
@@ -294,5 +317,5 @@ func (s *Server) maintenanceAction(w http.ResponseWriter, r *http.Request) error
 func (s *Server) auditList(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
 	u := actor(r)
-	return s.rows(w, r, `SELECT a.id,a.actor_id,u.name AS actor,a.action,a.entity,a.entity_id,a.before_data,a.after_data,a.created_at,a.branch_id,a.related_branch_id,a.request_id,a.peer_ip,a.user_agent FROM audit_logs a JOIN users u ON u.id=a.actor_id WHERE a.org_id=$1 AND ($4 OR can_access_branch(a.org_id,$5,a.branch_id) OR can_access_branch(a.org_id,$5,a.related_branch_id) OR (a.branch_id IS NULL AND a.actor_id=$5)) AND ($6::bigint=0 OR a.branch_id=$6 OR a.related_branch_id=$6) ORDER BY a.id DESC LIMIT $2 OFFSET $3`, u.OrgID, z, (p-1)*z, u.AllBranches, u.ID, selectedBranch(r))
+	return s.rows(w, r, `SELECT a.id,a.actor_id,u.name AS actor,a.action,a.entity,a.entity_id,a.before_data,a.after_data,a.created_at,a.branch_id,a.related_branch_id,a.request_id,a.peer_ip,a.user_agent FROM audit_logs a JOIN users u ON u.id=a.actor_id WHERE a.org_id=$1 AND ($4 OR can_access_branch(a.org_id,$5,a.branch_id) OR can_access_branch(a.org_id,$5,a.related_branch_id)) AND ($6::bigint=0 OR a.branch_id=$6 OR a.related_branch_id=$6) ORDER BY a.id DESC LIMIT $2 OFFSET $3`, u.OrgID, z, (p-1)*z, u.AllBranches, u.ID, selectedBranch(r))
 }

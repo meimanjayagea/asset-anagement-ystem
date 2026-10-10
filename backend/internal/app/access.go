@@ -65,8 +65,24 @@ func (s *Server) updateUserAccess(w http.ResponseWriter, r *http.Request) error 
 	if !validRole(in.Role) {
 		return fail(422, "Role tidak valid")
 	}
+	if !canAssignRole(actor(r).Role, in.Role) {
+		return fail(403, "Role tersebut tidak dapat diberikan oleh admin cabang")
+	}
 	if in.Role == "admin" {
 		in.All = true
+	}
+	if actor(r).Role == "branch_admin" {
+		if len(actor(r).BranchIDs) != 1 {
+			return fail(403, "Admin cabang harus memiliki tepat satu cabang aktif")
+		}
+		in.All = false
+		in.Branches = append([]int64(nil), actor(r).BranchIDs...)
+	}
+	if in.Role != "admin" && in.All {
+		return fail(422, "Hanya admin pusat yang dapat memiliki akses seluruh cabang")
+	}
+	if in.Role == "branch_admin" && (in.All || uniqueCount(in.Branches) != 1) {
+		return fail(422, "Admin cabang harus memiliki tepat satu cabang")
 	}
 	if n == actor(r).ID {
 		return fail(403, "Perubahan akses sendiri tidak diizinkan")
@@ -77,23 +93,44 @@ func (s *Server) updateUserAccess(w http.ResponseWriter, r *http.Request) error 
 			return e
 		}
 		var admins int
-		if e := tx.QueryRow(r.Context(), `SELECT count(*) FROM users WHERE org_id=$1 AND role='admin' AND active`, u.OrgID).Scan(&admins); e != nil {
+		if e := tx.QueryRow(r.Context(), `SELECT count(*) FROM users WHERE org_id=$1 AND role='admin' AND active AND deleted_at IS NULL`, u.OrgID).Scan(&admins); e != nil {
 			return e
 		}
 		var role string
 		var active, all bool
 		var oldBranches []int64
-		e := tx.QueryRow(r.Context(), `SELECT role,active,all_branches,ARRAY(SELECT branch_id FROM user_branches WHERE user_id=users.id) FROM users WHERE org_id=$1 AND id=$2 FOR UPDATE`, u.OrgID, n).Scan(&role, &active, &all, &oldBranches)
+		e := tx.QueryRow(r.Context(), `SELECT role,active,all_branches,ARRAY(SELECT branch_id FROM user_branches WHERE user_id=users.id) FROM users WHERE org_id=$1 AND id=$2 AND deleted_at IS NULL FOR UPDATE`, u.OrgID, n).Scan(&role, &active, &all, &oldBranches)
 		if e == pgx.ErrNoRows {
 			return fail(404, "User tidak ditemukan")
 		}
 		if e != nil {
 			return e
 		}
+		if u.Role == "branch_admin" {
+			if role == "admin" || role == "branch_admin" {
+				return fail(404, "User tidak ditemukan")
+			}
+			in.All = false
+			in.Branches = append([]int64(nil), u.BranchIDs...)
+			if !canAssignRole(u.Role, in.Role) {
+				return fail(403, "Role tersebut tidak dapat diberikan oleh admin cabang")
+			}
+			shared := false
+			for _, oldBranch := range oldBranches {
+				for _, branch := range u.BranchIDs {
+					if oldBranch == branch {
+						shared = true
+					}
+				}
+			}
+			if !shared {
+				return fail(404, "User tidak ditemukan")
+			}
+		}
 		if role == "admin" && active && (in.Role != "admin" || !in.Active) && admins <= 1 {
 			return fail(409, "Minimal satu admin aktif diperlukan")
 		}
-		_, e = tx.Exec(r.Context(), `UPDATE users SET role=$1,active=$2,all_branches=$5 WHERE org_id=$3 AND id=$4`, in.Role, in.Active, u.OrgID, n, in.All)
+		_, e = tx.Exec(r.Context(), `UPDATE users SET role=$1,active=$2,all_branches=$5 WHERE org_id=$3 AND id=$4 AND deleted_at IS NULL`, in.Role, in.Active, u.OrgID, n, in.All)
 		if e != nil {
 			return e
 		}

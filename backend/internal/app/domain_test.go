@@ -26,6 +26,28 @@ func TestBookValue(t *testing.T) {
 		}
 	}
 }
+
+func TestDepreciationMethods(t *testing.T) {
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	checks := []struct {
+		method string
+		at     time.Time
+		want   int64
+	}{
+		{"straight_line", start.AddDate(0, 6, 0), 550},
+		{"non_depreciable", start.AddDate(0, 12, 0), 1000},
+		{"declining_balance", start.AddDate(0, 12, 0), 100},
+	}
+	for _, check := range checks {
+		if got := depreciationBookValue(check.method, 1000, 100, 12, start, check.at); got != check.want {
+			t.Errorf("%s got %d, want %d", check.method, got, check.want)
+		}
+	}
+	ddb := depreciationBookValue("declining_balance", 1000, 100, 12, start, start.AddDate(0, 6, 0))
+	if ddb >= 550 || ddb <= 100 {
+		t.Fatalf("double-declining estimate out of expected range: %d", ddb)
+	}
+}
 func TestValidation(t *testing.T) {
 	if validateMoney(100, 101, 12) == nil || validateMoney(100, 0, 0) == nil || validateMoney(-1, 0, 12) == nil {
 		t.Fatal("invalid accepted")

@@ -1,5 +1,7 @@
 # Analisis mendalam — AssetFlow
 
+Flow terbaru untuk seluruh sepuluh kapabilitas, desain bahasa/tema, maker-checker dan batas akuntansi ada di [FEATURE-FLOW-AND-DESIGN.md](FEATURE-FLOW-AND-DESIGN.md).
+
 ## 1. Tujuan bisnis dan asumsi
 
 Sistem mengendalikan keberadaan, kepemilikan operasional, biaya, dan lifecycle aset agar keputusan pembelian/pemanfaatan/penggantian dapat diaudit. Asumsi awal: aset fisik unik (laptop, mesin, kendaraan, furniture, alat operasional), IDR, timezone bisnis Asia/Jakarta, organisasi memiliki admin dan checker berbeda. Sistem bukan stok barang habis pakai; inventory kuantitatif perlu bounded context tersendiri.
@@ -9,13 +11,13 @@ Definisi penting:
 | Konsep | Definisi | Implementasi |
 |---|---|---|
 | Asset | Unit fisik dengan tag unik per organisasi | Ya |
-| Category | Kelompok + default masa manfaat + interval/instruksi maintenance | Ya |
+| Category | Kelompok + default masa manfaat/metode penyusutan + interval/instruksi maintenance | Ya |
 | Branch | Cabang perusahaan dengan code unik | Ya, per organisasi |
 | Location | Lokasi fisik di dalam cabang | Ya, FK cabang |
 | Custodian | Penanggung jawab pemakaian | Teks wajib pada assignment |
 | Organization | Batas akses data pengguna | org_id dari session, bukan payload |
 | Acquisition cost | Biaya perolehan IDR | Integer rupiah, tidak memakai float |
-| Book estimate | Biaya minus depresiasi bulanan | Straight-line estimate |
+| Book estimate | Biaya/basis revaluasi minus penyusutan bulanan | Estimasi garis lurus, saldo menurun ganda, atau non-depreciable; integer IDR |
 | Request | Usulan transfer/disposal yang belum efektif | Maker–checker |
 | Work order | Jadwal pekerjaan maintenance | Schedule/start/complete/cancel |
 | Stocktake | Snapshot ekspektasi aset lokasi | Observasi tag + discrepancy |
