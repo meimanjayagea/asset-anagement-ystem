@@ -70,7 +70,7 @@ func run() error {
 		for _, migration := range []struct {
 			Version int
 			File    string
-		}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}} {
+		}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}} {
 			var exists bool
 			if e = conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.Version).Scan(&exists); e != nil {
 				return e
@@ -124,7 +124,8 @@ func run() error {
 			return fmt.Errorf("bootstrap hanya untuk database kosong")
 		}
 		var org int64
-		e = tx.QueryRow(ctx, `INSERT INTO organizations(name) VALUES($1) RETURNING id`, name).Scan(&org)
+		var orgCode string
+		e = tx.QueryRow(ctx, `INSERT INTO organizations(name) VALUES($1) RETURNING id,code`, name).Scan(&org, &orgCode)
 		if e != nil {
 			return e
 		}
@@ -148,7 +149,7 @@ func run() error {
 		if e = tx.Commit(ctx); e != nil {
 			return e
 		}
-		slog.Info("bootstrap complete", "org_id", org)
+		slog.Info("bootstrap complete", "org_id", org, "org_code", orgCode)
 		return nil
 	}
 	origin := os.Getenv("APP_ORIGIN")

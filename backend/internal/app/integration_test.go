@@ -71,6 +71,13 @@ func TestAPIIntegration(t *testing.T) {
 	if _, e = db.Exec(ctx, string(migration)); e != nil {
 		t.Fatal(e)
 	}
+	migration, e = os.ReadFile("../../migrations/005_organization_codes.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Exec(ctx, string(migration)); e != nil {
+		t.Fatal(e)
+	}
 	pw, _ := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.MinCost)
 	for _, q := range []string{`INSERT INTO organizations(name) VALUES('One'),('Two')`, `INSERT INTO branches(org_id,code,name) VALUES(1,'BDG','Bandung'),(1,'JKT','Jakarta'),(1,'HQ','Main'),(2,'HQ','Secret')`, `INSERT INTO locations(org_id,branch_id,name) VALUES(1,1,'Bandung'),(1,2,'Jakarta'),(1,3,'HQ'),(2,4,'Secret')`, `INSERT INTO categories(org_id,name,useful_life_months) VALUES(1,'IT',48),(2,'IT',48)`} {
 		if _, e = db.Exec(ctx, q); e != nil {
@@ -129,7 +136,13 @@ func TestAPIIntegration(t *testing.T) {
 		}
 	}
 	cookie := func(role string, org int) string {
-		w := call("POST", "/api/login", "", map[string]any{"email": role + "@test.local", "password": "test-password-123", "org_id": org})
+		branchID := 1
+		if org == 2 {
+			branchID = 4
+		} else if role == "branch-admin" {
+			branchID = 2
+		}
+		w := call("POST", "/api/login", "", map[string]any{"email": role + "@test.local", "password": "test-password-123", "org_code": fmt.Sprintf("ORG-%06d", org), "branch_id": branchID})
 		expect(t, w, 200)
 		c := w.Result().Cookies()[0]
 		if !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
@@ -142,6 +155,24 @@ func TestAPIIntegration(t *testing.T) {
 	assetBody := func(tag string) map[string]any {
 		return map[string]any{"tag": tag, "name": "Laptop", "serial_number": "", "category_id": 1, "location_id": 1, "purchase_date": "2026-01-01", "purchase_cost": 10000000, "salvage_value": 1000000, "useful_life_months": 48, "warranty_until": nil}
 	}
+	t.Run("login-options-return-organization-code", func(t *testing.T) {
+		w := call("GET", "/api/login/options", "", nil)
+		expect(t, w, 200)
+		var options struct {
+			Organizations []struct {
+				Code     string `json:"code"`
+				Branches []struct {
+					Code string `json:"code"`
+				} `json:"branches"`
+			} `json:"organizations"`
+		}
+		if e := json.Unmarshal(w.Body.Bytes(), &options); e != nil {
+			t.Fatal(e)
+		}
+		if len(options.Organizations) != 2 || options.Organizations[0].Code != "ORG-000001" || len(options.Organizations[0].Branches) != 3 {
+			t.Fatalf("unexpected login options: %s", w.Body.String())
+		}
+	})
 	t.Run("authorization-and-tenant", func(t *testing.T) {
 		expect(t, call("GET", "/api/assets", "", nil), 401)
 		expect(t, call("POST", "/api/assets", auditor, assetBody("DENIED")), 403)
@@ -242,13 +273,13 @@ func TestAPIIntegration(t *testing.T) {
 	})
 
 	t.Run("branch-scopes-and-activity", func(t *testing.T) {
-		login := call("POST", "/api/login", "", map[string]any{"email": "branch-admin@test.local", "password": "test-password-123", "org_id": 1, "branch_id": 0})
+		login := call("POST", "/api/login", "", map[string]any{"email": "branch-admin@test.local", "password": "test-password-123", "org_code": "ORG-000001", "branch_id": 2})
 		expect(t, login, 200)
 		var loginBody struct {
 			ActiveBranch int64 `json:"active_branch_id"`
 		}
 		if e := json.Unmarshal(login.Body.Bytes(), &loginBody); e != nil || loginBody.ActiveBranch != 2 {
-			t.Fatalf("branch admin login did not fall back to its permitted branch: %+v (%v)", loginBody, e)
+			t.Fatalf("branch admin login did not select its permitted branch: %+v (%v)", loginBody, e)
 		}
 		branchList := call("GET", "/api/branches", branchAdmin, nil)
 		expect(t, branchList, 200)
@@ -339,10 +370,16 @@ func TestAPIIntegration(t *testing.T) {
 		if _, e = db.Exec(ctx, `INSERT INTO user_branches(org_id,user_id,branch_id) VALUES(1,$1,1)`, restrictedID); e != nil {
 			t.Fatal(e)
 		}
-		scopedLogin := call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_id": 1})
+		scopedLogin := call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_code": "ORG-000001", "branch_id": 1})
 		expect(t, scopedLogin, 200)
 		c := scopedLogin.Result().Cookies()[0]
 		scoped := c.Name + "=" + c.Value
+		rejectedBranch := call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_code": "ORG-000001", "branch_id": 2})
+		expect(t, rejectedBranch, 403)
+		if !strings.Contains(rejectedBranch.Body.String(), "Email ini tidak terdaftar pada cabang yang dipilih") {
+			t.Fatalf("wrong branch login did not explain the access denial: %s", rejectedBranch.Body.String())
+		}
+		expect(t, call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_code": "ORG-000001"}), 422)
 		expect(t, call("GET", "/api/assets?branch_id=2", scoped, nil), 403)
 		w := call("GET", "/api/assets", scoped, nil)
 		expect(t, w, 200)
@@ -367,7 +404,7 @@ func TestAPIIntegration(t *testing.T) {
 		body = assetBody("LOCAL-DENIED")
 		body["location_id"] = 2
 		expect(t, call("POST", "/api/assets", scoped, body), 403)
-		expect(t, call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "wrong", "org_id": 1}), 401)
+		expect(t, call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "wrong", "org_code": "ORG-000001", "branch_id": 1}), 401)
 		expect(t, call("GET", "/api/activity", admin, nil), 200)
 		var logins, failed, denied, reads int
 		e = db.QueryRow(ctx, `SELECT count(*) FILTER(WHERE event='login_success'),count(*) FILTER(WHERE event='login_failed'),count(*) FILTER(WHERE event='denied'),count(*) FILTER(WHERE event='read') FROM user_activity_logs WHERE org_id=1`).Scan(&logins, &failed, &denied, &reads)

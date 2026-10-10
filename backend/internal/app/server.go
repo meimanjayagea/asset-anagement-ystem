@@ -233,7 +233,7 @@ func (s *Server) auth(capability string, h func(http.ResponseWriter, *http.Reque
 	})
 }
 func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.DB.Query(r.Context(), `SELECT o.id,o.name,b.id,b.code,b.name FROM organizations o JOIN branches b ON b.org_id=o.id AND b.deleted_at IS NULL ORDER BY o.id,b.code`)
+	rows, e := s.DB.Query(r.Context(), `SELECT o.id,o.code,o.name,b.id,b.code,b.name FROM organizations o JOIN branches b ON b.org_id=o.id AND b.deleted_at IS NULL ORDER BY o.id,b.code`)
 	if e != nil {
 		report(w, e)
 		return
@@ -246,6 +246,7 @@ func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
 	}
 	type organizationOption struct {
 		ID       int64          `json:"id"`
+		Code     string         `json:"code"`
 		Name     string         `json:"name"`
 		Branches []branchOption `json:"branches"`
 	}
@@ -253,8 +254,8 @@ func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
 	indexes := map[int64]int{}
 	for rows.Next() {
 		var orgID, branchID int64
-		var orgName, code, branchName string
-		if e = rows.Scan(&orgID, &orgName, &branchID, &code, &branchName); e != nil {
+		var orgCode, orgName, code, branchName string
+		if e = rows.Scan(&orgID, &orgCode, &orgName, &branchID, &code, &branchName); e != nil {
 			report(w, e)
 			return
 		}
@@ -262,7 +263,7 @@ func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			index = len(orgs)
 			indexes[orgID] = index
-			orgs = append(orgs, organizationOption{ID: orgID, Name: orgName, Branches: []branchOption{}})
+			orgs = append(orgs, organizationOption{ID: orgID, Code: orgCode, Name: orgName, Branches: []branchOption{}})
 		}
 		orgs[index].Branches = append(orgs[index].Branches, branchOption{ID: branchID, Code: code, Name: branchName})
 	}
@@ -276,6 +277,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		OrgCode  string `json:"org_code"`
 		OrgID    int64  `json:"org_id"`
 		BranchID int64  `json:"branch_id"`
 	}
@@ -284,6 +286,24 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
+	in.OrgCode = strings.ToUpper(strings.TrimSpace(in.OrgCode))
+	if in.OrgCode != "" {
+		var orgID int64
+		e := s.DB.QueryRow(r.Context(), `SELECT id FROM organizations WHERE code=$1`, in.OrgCode).Scan(&orgID)
+		if errors.Is(e, pgx.ErrNoRows) {
+			report(w, fail(422, "Kode organisasi tidak valid"))
+			return
+		}
+		if e != nil {
+			report(w, e)
+			return
+		}
+		if in.OrgID > 0 && in.OrgID != orgID {
+			report(w, fail(422, "Kode organisasi tidak valid"))
+			return
+		}
+		in.OrgID = orgID
+	}
 	meta(r.Context()).LoginOrg = in.OrgID
 	if in.BranchID > 0 {
 		meta(r.Context()).Branch = &in.BranchID
@@ -294,6 +314,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(in.Email) < 3 || len(in.Email) > 254 || len(in.Password) < 1 || len(in.Password) > 72 || in.OrgID < 1 || in.BranchID < 0 {
 		report(w, fail(422, "Kredensial tidak valid"))
+		return
+	}
+	if in.BranchID < 1 {
+		report(w, fail(422, "Cabang wajib dipilih"))
 		return
 	}
 	key := fmt.Sprintf("%d:%s", in.OrgID, in.Email)
@@ -331,27 +355,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	u.Capabilities = capabilitiesForRole(u.Role)
 	u.ActiveBranchID = in.BranchID
-	if u.ActiveBranchID > 0 {
-		var allowed bool
-		e = s.DB.QueryRow(r.Context(), `SELECT can_access_branch($1,$2,$3)`, u.OrgID, u.ID, u.ActiveBranchID).Scan(&allowed)
-		if e != nil {
-			report(w, e)
-			return
-		}
-		if !allowed {
-			u.ActiveBranchID = 0
-		}
+	var allowed bool
+	e = s.DB.QueryRow(r.Context(), `SELECT can_access_branch($1,$2,$3)`, u.OrgID, u.ID, u.ActiveBranchID).Scan(&allowed)
+	if e != nil {
+		report(w, e)
+		return
 	}
-	if !u.AllBranches && u.ActiveBranchID == 0 {
-		e = s.DB.QueryRow(r.Context(), `SELECT COALESCE(min(b.id),0) FROM branches b JOIN user_branches ub ON ub.branch_id=b.id AND ub.org_id=b.org_id WHERE ub.org_id=$1 AND ub.user_id=$2 AND b.deleted_at IS NULL AND can_access_branch($1,$2,b.id)`, u.OrgID, u.ID).Scan(&u.ActiveBranchID)
-		if e != nil {
-			report(w, e)
-			return
-		}
-		if u.ActiveBranchID == 0 {
-			report(w, fail(401, "Kredensial tidak valid"))
-			return
-		}
+	if !allowed {
+		report(w, fail(403, "Email ini tidak terdaftar pada cabang yang dipilih"))
+		return
 	}
 	meta(r.Context()).User = &u
 	if u.ActiveBranchID > 0 {

@@ -16,6 +16,7 @@ export interface RoleOption {
 }
 export interface LoginOrganization {
   id: number;
+  code: string;
   name: string;
   branches: { id: number; code: string; name: string }[];
 }

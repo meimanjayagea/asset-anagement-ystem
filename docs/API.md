@@ -10,6 +10,7 @@ Errors: `{"error":"message"}`. HTTP 400 malformed JSON, 401 unauthenticated/sess
 |---|---|---|
 | GET | /health/live | Public, process live |
 | GET | /health/ready | Public, DB ping |
+| GET | /login/options | Public, organization codes and active branches |
 | POST | /login | Public, authenticated user + cookie |
 | POST | /logout | All authenticated, ok |
 | GET | /me | All, id/org_id/name/email/role |
@@ -60,8 +61,10 @@ Pagination size clamps to 1–100 (default 25); page starts at 1. General arrays
 
 Login:
 ```json
-{"email":"admin@example.com","password":"your-unique-password","org_id":1}
+{"email":"admin@example.com","password":"your-unique-password","org_code":"ORG-000001","branch_id":1}
 ```
+
+Kode organisasi diperoleh saat bootstrap dan dicantumkan pada log bootstrap. Cabang harus dipilih; login hanya berhasil jika akun memiliki akses ke cabang tersebut. Email yang tidak terdaftar pada cabang terpilih menerima HTTP 403.
 
 Register:
 ```json
@@ -135,7 +138,7 @@ Create: HTTP 201 `{"id":123}`. Action: HTTP 200 `{"ok":true}`. IDs/version/nilai
 ```bash
 curl -c /tmp/assetflow.cookies http://localhost:8088/api/login \
  -H 'Content-Type: application/json' -H 'X-Requested-With: AssetFlow' \
- -d '{"org_id":1,"email":"admin@example.com","password":"your-password"}'
+ -d '{"org_code":"ORG-000001","branch_id":1,"email":"admin@example.com","password":"your-password"}'
 curl -b /tmp/assetflow.cookies http://localhost:8088/api/dashboard
 rm -f /tmp/assetflow.cookies
 ```

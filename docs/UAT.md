@@ -51,6 +51,8 @@ Include data correction SOP, lost asset investigation, approval delegation and o
 | BR-03 | Direct foreign asset assign/maintenance/stocktake | 404/403 with activity denial captured |
 | BR-04 | Transfer by one-branch user to foreign destination | Denied; multi-branch maker + other checker accepted |
 | BR-05 | Reassign user scope | Old sessions revoked; new login enforces revised scope |
+| AUTH-01 | Enter organization code and select an active branch | Only branches under that organization code are listed; branch is required |
+| AUTH-02 | Log in with valid credentials on an unassigned branch | Login denied with an explicit branch-membership error |
 | AU-03 | Successful/failed login, logout, GET and denied mutation | All events recorded; no password/token/body |
 | AU-04 | Read activity with branch auditor | Scoped events, no company failed-login leakage |
 | AU-05 | Activity DB permission failure | HTTP 503, request ID in server log; refresh mutation result |

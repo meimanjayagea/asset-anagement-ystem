@@ -60,7 +60,7 @@ const me = ref<User | null>(null),
   page = ref("dashboard"),
   modal = ref(""),
   selected = ref<Asset | null>(null);
-const login = reactive({ email: "", password: "", org_id: 0, branch_id: 0 }),
+const login = reactive({ email: "", password: "", org_code: "", branch_id: 0 }),
   loginOrganizations = ref<LoginOrganization[]>([]),
   roleOptions = ref<RoleOption[]>([]),
   stats = ref<Record<string, number>>({}),
@@ -77,6 +77,11 @@ const branches = ref<any[]>([]),
   showArchived = ref(false),
   activityEvent = ref(""),
   historyRecords = ref<any[]>([]);
+const loginOrganization = computed(() => {
+  const code = login.org_code.trim().toUpperCase();
+  return loginOrganizations.value.find((organization) => organization.code === code);
+});
+const loginBranches = computed(() => loginOrganization.value?.branches || []);
 const assetLocations = computed(() =>
   locations.value.filter((l) => l.branch_id === form.value.asset_branch_id),
 );
@@ -120,7 +125,7 @@ const nav = computed(() =>
   ].filter((item: any) => item.show !== false && can(item.cap)),
 );
 watch(
-  () => login.org_id,
+  () => login.org_code,
   () => {
     login.branch_id = 0;
   },
@@ -298,7 +303,12 @@ async function signIn() {
   saving.value = true;
   error.value = "";
   try {
-    const signedIn = await api<User>("/login", login);
+    const signedIn = await api<User>("/login", {
+      email: login.email,
+      password: login.password,
+      org_code: login.org_code,
+      branch_id: login.branch_id,
+    });
     me.value = signedIn;
     branch.value = signedIn.active_branch_id;
     login.password = "";
@@ -723,7 +733,6 @@ onMounted(async () => {
   try {
     const options = await api<{ organizations: LoginOrganization[] }>("/login/options");
     loginOrganizations.value = options.organizations;
-    if (loginOrganizations.value.length) login.org_id = loginOrganizations.value[0].id;
     const sessionUser = await api<User>("/me");
     me.value = sessionUser;
     branch.value = sessionUser.active_branch_id;
@@ -773,40 +782,44 @@ onUnmounted(() => {
         <h2>{{ t("login.title") }}</h2>
         <p>{{ t("login.description") }}</p>
         <form @submit.prevent="signIn">
-          <label
-            >{{ t("login.organization") }}<select v-model.number="login.org_id" required>
+          <label>{{ copy("Kode organisasi", "Organization code") }}<input
+            v-model.trim="login.org_code"
+            type="text"
+            autocomplete="organization"
+            list="organization-codes"
+            :placeholder="copy('Contoh: ORG-000001', 'Example: ORG-000001')"
+            required
+          /></label>
+          <datalist id="organization-codes">
+            <option
+              v-for="organization in loginOrganizations"
+              :key="organization.id"
+              :value="organization.code"
+              :label="organization.name"
+            />
+          </datalist>
+          <label>{{ t("login.branch") }}<select v-model.number="login.branch_id" required :disabled="!loginOrganization">
+              <option :value="0" disabled>{{ copy("Masukkan kode organisasi terlebih dahulu", "Enter an organization code first") }}</option>
               <option
-                v-for="organization in loginOrganizations"
-                :key="organization.id"
-                :value="organization.id"
-              >
-                {{ organization.name }}
-              </option>
-            </select></label
-          ><label
-            >{{ t("login.branch") }}<select v-model.number="login.branch_id" required>
-              <option :value="0">{{ t("common.allBranches") }}</option>
-              <option
-                v-for="item in loginOrganizations.find((o) => o.id === login.org_id)?.branches || []"
+                v-for="item in loginBranches"
                 :key="item.id"
                 :value="item.id"
               >
                 {{ item.code }} · {{ item.name }}
               </option>
-            </select></label
-          ><label
-            >{{ t("login.email") }}<input
-              v-model="login.email"
-              type="email"
-              autocomplete="username"
-              required /></label
-          ><label
-            >{{ t("login.password") }}<input
-              v-model="login.password"
-              type="password"
-              autocomplete="current-password"
-              required
-              maxlength="72"
+            </select></label>
+          <label>{{ t("login.email") }}<input
+            v-model="login.email"
+            type="email"
+            autocomplete="username"
+            required
+          /></label>
+          <label>{{ t("login.password") }}<input
+            v-model="login.password"
+            type="password"
+            autocomplete="current-password"
+            required
+            maxlength="72"
           /></label>
           <div v-if="error" class="alert" role="alert">{{ error }}</div>
           <button class="primary" :disabled="saving">
