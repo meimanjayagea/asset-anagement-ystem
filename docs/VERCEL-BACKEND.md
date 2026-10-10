@@ -35,6 +35,23 @@ restricted runtime role, and remove the migration credential and disable
 Startup and `/health/ready` now validate login schema and session/audit privileges;
 database connectivity alone no longer reports readiness.
 
+### Recovery with a provider-managed sensitive connection
+
+If the existing `DATABASE_URL` is an owner-capable managed connection that cannot
+be copied out of Vercel, temporarily set both `AUTO_MIGRATE=true` and
+`MIGRATION_USE_RUNTIME_DATABASE=true`, then redeploy the backend. This explicit
+opt-in uses the existing secret inside the server; it does not reveal it or
+grant additional database privileges. A restricted runtime role will fail the
+upgrade, requiring a separate `MIGRATION_DATABASE_URL` instead. An explicitly
+configured migration connection always takes precedence.
+
+After `/health/ready` and `/api/login/options` succeed, disable both recovery
+flags and redeploy. Do not leave automatic owner-connection migration enabled
+as the normal runtime configuration. An error such as `schema incomplete (2/6)`
+means startup stopped before serving HTTP because migrations are missing,
+not that the container build failed. Upgrades preserve existing password hashes;
+they do not reset accounts or bootstrap a populated database.
+
 The frontend currently calls same-origin `/api` and `/health` paths. Add
 frontend rewrites to the backend only after its database, schema, and health
 endpoint are ready. Keep the database connection pool's total across scaled

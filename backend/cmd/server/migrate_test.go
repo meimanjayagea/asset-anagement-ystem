@@ -12,7 +12,38 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func TestMigrationConnection(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, owner, runtime, optIn, want string
+		wantError                                  bool
+	}{
+		{"owner", "serve", "owner", "runtime", "", "owner", false},
+		{"restricted-default", "serve", "", "runtime", "", "", true},
+		{"explicit-recovery", "serve", "", "runtime", "true", "runtime", false},
+		{"invalid-opt-in", "serve", "", "runtime", "1", "", true},
+		{"missing-recovery-connection", "serve", "", "", "true", "", true},
+		{"manual", "migrate", "", "runtime", "", "runtime", false},
+		{"owner-precedence", "serve", "owner", "runtime", "true", "owner", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := map[string]string{"MIGRATION_DATABASE_URL": tc.owner, "DATABASE_URL": tc.runtime, "MIGRATION_USE_RUNTIME_DATABASE": tc.optIn}
+			got, err := migrationConnection(tc.command, func(key string) string { return env[key] })
+			if got != tc.want || (err != nil) != tc.wantError {
+				t.Fatalf("connection selection = %q, %v", got, err)
+			}
+		})
+	}
+}
+
 func TestMigrationUpgradeAndConcurrentStartup(t *testing.T) {
+	for _, version := range []int{2, 4} {
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			testMigrationUpgrade(t, version)
+		})
+	}
+}
+
+func testMigrationUpgrade(t *testing.T, version int) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL required for PostgreSQL integration tests")
@@ -41,7 +72,7 @@ func TestMigrationUpgradeAndConcurrentStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, name := range []string{"001_init.sql", "002_branches_activity.sql", "003_roles_scope_archive.sql", "004_finance_lifecycle.sql"} {
+	for _, name := range []string{"001_init.sql", "002_branches_activity.sql", "003_roles_scope_archive.sql", "004_finance_lifecycle.sql"}[:version] {
 		sql, err := migrations.ReadFile("migrations/" + name)
 		if err != nil {
 			t.Fatal(err)

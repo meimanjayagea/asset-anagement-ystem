@@ -30,15 +30,12 @@ func run() error {
 		return fmt.Errorf("unknown command: %s", command)
 	}
 	if command == "migrate" || (command == "serve" && os.Getenv("AUTO_MIGRATE") == "true") {
-		migrationDSN := os.Getenv("MIGRATION_DATABASE_URL")
-		if migrationDSN == "" && command == "migrate" {
-			migrationDSN = os.Getenv("DATABASE_URL")
-		}
-		if migrationDSN == "" {
-			return fmt.Errorf("MIGRATION_DATABASE_URL required for AUTO_MIGRATE")
+		migrationDSN, err := migrationConnection(command, os.Getenv)
+		if err != nil {
+			return err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		err := migrateDatabase(ctx, migrationDSN)
+		err = migrateDatabase(ctx, migrationDSN)
 		cancel()
 		if err != nil {
 			return err

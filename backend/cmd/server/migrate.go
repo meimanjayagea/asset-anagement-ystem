@@ -9,6 +9,20 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func migrationConnection(command string, getenv func(string) string) (string, error) {
+	if dsn := getenv("MIGRATION_DATABASE_URL"); dsn != "" {
+		return dsn, nil
+	}
+	// Explicit recovery opt-in lets managed secrets stay inside the deployment.
+	if command == "migrate" || getenv("MIGRATION_USE_RUNTIME_DATABASE") == "true" {
+		if dsn := getenv("DATABASE_URL"); dsn != "" {
+			return dsn, nil
+		}
+		return "", fmt.Errorf("DATABASE_URL required for runtime-connection migration")
+	}
+	return "", fmt.Errorf("MIGRATION_DATABASE_URL required for AUTO_MIGRATE; temporary owner-connection recovery requires MIGRATION_USE_RUNTIME_DATABASE=true")
+}
+
 func migrateDatabase(ctx context.Context, dsn string) error {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
