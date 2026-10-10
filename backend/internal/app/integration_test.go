@@ -358,10 +358,7 @@ func TestAPIIntegration(t *testing.T) {
 			t.Fatalf("IT support received financial summary: %s", itDashboard.Body.String())
 		}
 		export := call("POST", "/api/exports/assets", itSupport, map[string]any{"page": 1, "size": 25, "branch_id": 0})
-		expect(t, export, 200)
-		if strings.Contains(export.Body.String(), "purchase_cost") || strings.Contains(export.Body.String(), "9900000") {
-			t.Fatalf("non-finance export leaked costs: %s", export.Body.String())
-		}
+		expect(t, export, 403)
 		developerAudit := call("GET", "/api/audit", itDeveloper, nil)
 		expect(t, developerAudit, 403)
 		_ = branchAsset
