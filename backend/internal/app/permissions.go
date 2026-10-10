@@ -29,6 +29,7 @@ var allCapabilities = []string{
 	"assets.history", "contracts.read", "contracts.manage", "finance.read",
 	"finance.manage", "valuation.propose", "valuation.decide", "reports.read",
 	"reports.export",
+	"photos.write", "loans.read", "loans.request", "loans.manage", "maintenance.request",
 }
 
 var roleCapabilities = map[string][]string{
@@ -61,7 +62,7 @@ var roleCapabilities = map[string][]string{
 	},
 	"employee": {
 		"dashboard.read", "assets.read", "requests.read", "requests.create", "branches.read",
-		"locations.read", "categories.read",
+		"locations.read", "categories.read", "maintenance.read",
 	},
 	"finance": {
 		"dashboard.read", "assets.read", "assets.finance", "assets.export", "requests.read",
@@ -83,7 +84,7 @@ var roleCapabilities = map[string][]string{
 	"auditor": {
 		"dashboard.read", "assets.read", "requests.read", "maintenance.read", "stocktakes.read",
 		"branches.read", "locations.read", "categories.read",
-		"assets.history", "reports.read",
+		"assets.history", "reports.read", "audit.read", "activity.read", "stocktakes.observe",
 	},
 }
 
@@ -96,6 +97,16 @@ func hasCapability(role, capability string) bool {
 		}
 		return false
 	}
+	switch capability {
+	case "photos.write":
+		return hasCapability(role, "assets.write") || hasCapability(role, "requests.create") || hasCapability(role, "stocktakes.observe")
+	case "loans.read":
+		return hasCapability(role, "assets.read")
+	case "loans.request", "maintenance.request":
+		return hasCapability(role, "requests.create")
+	case "loans.manage":
+		return hasCapability(role, "assets.operate")
+	}
 	for _, candidate := range roleCapabilities[role] {
 		if candidate == capability {
 			return true
@@ -105,10 +116,13 @@ func hasCapability(role, capability string) bool {
 }
 
 func capabilitiesForRole(role string) []string {
-	if role == "admin" {
-		return append([]string(nil), allCapabilities...)
+	out := []string{}
+	for _, capability := range allCapabilities {
+		if hasCapability(role, capability) {
+			out = append(out, capability)
+		}
 	}
-	return append([]string(nil), roleCapabilities[role]...)
+	return out
 }
 
 func validRole(role string) bool {

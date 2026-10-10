@@ -11,6 +11,8 @@ GRANT SELECT,INSERT ON user_activity_logs TO assetflow_runtime;
 GRANT SELECT,INSERT ON audit_logs TO assetflow_runtime;
 GRANT SELECT,INSERT ON asset_movements TO assetflow_runtime;
 GRANT SELECT,INSERT,UPDATE ON asset_valuations,service_contracts,accounting_profiles TO assetflow_runtime;
+GRANT SELECT,INSERT ON asset_photos,asset_photo_links TO assetflow_runtime;
+GRANT SELECT,INSERT,UPDATE ON asset_loans,notification_receipts TO assetflow_runtime;
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO assetflow_runtime;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 -- Runtime has no table ownership, DDL, superuser or audit UPDATE/DELETE/TRUNCATE.

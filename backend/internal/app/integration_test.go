@@ -91,6 +91,15 @@ func TestAPIIntegration(t *testing.T) {
 	if _, e = db.Exec(ctx, string(migration)); e != nil {
 		t.Fatal(e)
 	}
+	for _, file := range []string{"007_field_lifecycle.sql", "008_record_metadata.sql"} {
+		migration, e = os.ReadFile("../../migrations/" + file)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = db.Exec(ctx, string(migration)); e != nil {
+			t.Fatal(e)
+		}
+	}
 	pw, _ := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.MinCost)
 	for _, q := range []string{`INSERT INTO organizations(name) VALUES('One'),('Two')`, `INSERT INTO branches(org_id,code,name) VALUES(1,'BDG','Bandung'),(1,'JKT','Jakarta'),(1,'HQ','Main'),(2,'HQ','Secret')`, `INSERT INTO locations(org_id,branch_id,name) VALUES(1,1,'Bandung'),(1,2,'Jakarta'),(1,3,'HQ'),(2,4,'Secret')`, `INSERT INTO categories(org_id,name,useful_life_months) VALUES(1,'IT',48),(2,'IT',48)`} {
 		if _, e = db.Exec(ctx, q); e != nil {
@@ -242,7 +251,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/assets", auditor, assetBody("DENIED")), 403)
 		expect(t, call("GET", "/api/users", operator, nil), 403)
 		expect(t, call("GET", "/api/audit", manager, nil), 403)
-		expect(t, call("GET", "/api/activity", auditor, nil), 403)
+		expect(t, call("GET", "/api/activity", auditor, nil), 200)
 		expect(t, call("GET", "/api/assets?branch_id=3", manager, nil), 403)
 		expect(t, call("POST", "/api/branches", branchAdmin, map[string]any{"code": "OUT", "name": "Forbidden"}), 403)
 		expect(t, call("POST", "/api/assets", itDeveloper, assetBody("ITDEV-DENIED")), 403)
@@ -271,7 +280,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/assets/1/action", operator, map[string]any{"action": "assign", "custodian": "Arya", "version": 2}), 200)
 		expect(t, call("POST", "/api/requests", operator, map[string]any{"asset_id": 1, "kind": "dispose", "target_location_id": nil, "reason": "Retire", "version": 3}), 409)
 		expect(t, call("POST", "/api/assets/1/action", operator, map[string]any{"action": "return", "version": 3}), 200)
-		expect(t, call("POST", "/api/requests", admin, map[string]any{"asset_id": 1, "kind": "dispose", "target_location_id": nil, "reason": "Retire", "version": 4}), 201)
+		expect(t, call("POST", "/api/requests", admin, map[string]any{"asset_id": 1, "kind": "dispose", "target_location_id": nil, "reason": "Retire", "version": 4, "photo_ids": []int64{uploadProof(t, call, admin, 1, "disposal")}}), 201)
 		// Identity sequences may have gaps after unique violation. Resolve newest pending request.
 		var requestID int64
 		db.QueryRow(ctx, `SELECT id FROM requests WHERE asset_id=1 AND status='pending'`).Scan(&requestID)
@@ -283,7 +292,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/assets/1/action", operator, map[string]any{"action": "assign", "custodian": "Arya", "version": 4}), 409)
 		expect(t, call("POST", "/api/maintenance/1/action", operator, map[string]any{"action": "complete", "cost": 1, "notes": "", "version": 4}), 409)
 		expect(t, call("POST", "/api/maintenance/1/action", operator, map[string]any{"action": "start", "cost": 0, "notes": "", "version": 4}), 200)
-		expect(t, call("POST", "/api/maintenance/1/action", operator, map[string]any{"action": "complete", "cost": 250000, "notes": "Service done", "version": 5}), 200)
+		expect(t, call("POST", "/api/maintenance/1/action", operator, map[string]any{"action": "complete", "cost": 250000, "notes": "Service done", "version": 5, "photo_ids": []int64{uploadProof(t, call, operator, 1, "repair")}}), 200)
 	})
 	t.Run("concurrent-assignment", func(t *testing.T) {
 		var wg sync.WaitGroup
@@ -321,7 +330,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", "/api/stocktakes/1/observe", operator, map[string]any{"tag": "AST-1", "notes": ""}), 409)
 	})
 	t.Run("audit-immutability", func(t *testing.T) {
-		expect(t, call("GET", "/api/audit", auditor, nil), 403)
+		expect(t, call("GET", "/api/audit", auditor, nil), 200)
 		expect(t, call("GET", "/api/audit", branchAdmin, nil), 200)
 		expect(t, call("GET", "/api/audit", operator, nil), 403)
 		if _, e := db.Exec(ctx, `DELETE FROM audit_logs`); e == nil {
@@ -696,8 +705,29 @@ func TestAPIIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 		expect(t, call("POST", fmt.Sprintf("/api/stocktakes/%d/close", stockID), admin, map[string]any{"acknowledge_discrepancies": false}), 409)
+		rows, err := db.Query(ctx, `SELECT asset_id,expected_tag FROM stocktake_items WHERE stocktake_id=$1 AND finding='unverified'`, stockID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type unseen struct {
+			id  int64
+			tag string
+		}
+		var unseenItems []unseen
+		for rows.Next() {
+			var item unseen
+			if err = rows.Scan(&item.id, &item.tag); err != nil {
+				t.Fatal(err)
+			}
+			unseenItems = append(unseenItems, item)
+		}
+		rows.Close()
+		for _, item := range unseenItems {
+			proof := uploadProof(t, call, admin, item.id, "audit")
+			expect(t, call("POST", fmt.Sprintf("/api/stocktakes/%d/observe", stockID), admin, map[string]any{"tag": item.tag, "finding": "missing", "notes": "Missing during field audit", "photo_ids": []int64{proof}}), 200)
+		}
 		expect(t, call("POST", fmt.Sprintf("/api/stocktakes/%d/close", stockID), admin, map[string]any{"acknowledge_discrepancies": true}), 200)
-		w = call("POST", "/api/requests", admin, map[string]any{"asset_id": created.ID, "kind": "dispose", "reason": "UAT retirement", "version": 2, "disposal_proceeds": 500000})
+		w = call("POST", "/api/requests", admin, map[string]any{"asset_id": created.ID, "kind": "dispose", "reason": "UAT retirement", "version": 2, "disposal_proceeds": 500000, "photo_ids": []int64{uploadProof(t, call, admin, created.ID, "disposal")}})
 		expect(t, w, 201)
 		var requestID int64
 		if err := db.QueryRow(ctx, `SELECT id FROM requests WHERE asset_id=$1 AND status='pending'`, created.ID).Scan(&requestID); err != nil {
@@ -709,6 +739,28 @@ func TestAPIIntegration(t *testing.T) {
 			t.Fatalf("disposal failed: %s (%v)", state, err)
 		}
 		expect(t, call("POST", fmt.Sprintf("/api/assets/%d/action", created.ID), admin, map[string]any{"action": "assign", "custodian": "Forbidden", "version": 3}), 409)
+	})
+	t.Run("field-lifecycle", func(t *testing.T) { exerciseLifecycle(t, call, admin, operator, auditor, other) })
+	t.Run("record-metadata-all-tables", func(t *testing.T) {
+		var missing int
+		if err := db.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables t WHERE t.table_schema=current_schema() AND t.table_type='BASE TABLE' AND EXISTS(SELECT 1 FROM unnest(ARRAY['created_at','created_by','updated_at','updated_by']) required(name) WHERE NOT EXISTS(SELECT 1 FROM information_schema.columns c WHERE c.table_schema=t.table_schema AND c.table_name=t.table_name AND c.column_name=required.name))`).Scan(&missing); err != nil || missing != 0 {
+			t.Fatalf("tables missing metadata=%d err=%v", missing, err)
+		}
+		var created, updated int64
+		var createdAt, updatedAt time.Time
+		if err := db.QueryRow(ctx, `SELECT created_by,updated_by,created_at,updated_at FROM assets WHERE tag='FIELD-LIFECYCLE'`).Scan(&created, &updated, &createdAt, &updatedAt); err != nil {
+			t.Fatal(err)
+		}
+		if created != 1 || updated != 1 || updatedAt.Before(createdAt) {
+			t.Fatalf("incorrect metadata %d/%d", created, updated)
+		}
+		var loanCreator, loanUpdater int64
+		if err := db.QueryRow(ctx, `SELECT created_by,updated_by FROM asset_loans WHERE asset_id=(SELECT id FROM assets WHERE tag='FIELD-LIFECYCLE')`).Scan(&loanCreator, &loanUpdater); err != nil {
+			t.Fatal(err)
+		}
+		if loanCreator != 3 || loanUpdater != 1 {
+			t.Fatalf("actors not preserved %d/%d", loanCreator, loanUpdater)
+		}
 	})
 	t.Run("logout-and-login-throttle", func(t *testing.T) {
 		fresh := cookie("admin", 1)

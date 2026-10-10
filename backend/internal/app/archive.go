@@ -19,7 +19,7 @@ func (s *Server) archiveAsset(w http.ResponseWriter, r *http.Request) error {
 			return e
 		}
 		var active bool
-		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress')) OR EXISTS(SELECT 1 FROM stocktake_items i JOIN stocktakes st ON st.id=i.stocktake_id WHERE i.org_id=$1 AND i.asset_id=$2 AND st.status='open')`, u.OrgID, n).Scan(&active)
+		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress')) OR EXISTS(SELECT 1 FROM asset_loans WHERE org_id=$1 AND asset_id=$2 AND status IN ('pending','checked_out')) OR EXISTS(SELECT 1 FROM stocktake_items i JOIN stocktakes st ON st.id=i.stocktake_id WHERE i.org_id=$1 AND i.asset_id=$2 AND st.status='open')`, u.OrgID, n).Scan(&active)
 		if e != nil {
 			return e
 		}

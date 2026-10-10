@@ -82,18 +82,21 @@ func (s *Server) createBranch(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) listLocations(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "locations.archive")
-	return s.rows(w, r, `SELECT l.id,l.name,l.branch_id,b.name AS branch_name,b.code AS branch_code,l.deleted_at FROM locations l JOIN branches b ON b.id=l.branch_id WHERE l.org_id=$1 AND (($4::boolean AND l.deleted_at IS NOT NULL) OR (NOT $4::boolean AND l.deleted_at IS NULL)) AND b.deleted_at IS NULL AND can_access_branch(l.org_id,$2,l.branch_id) AND ($3::bigint=0 OR l.branch_id=$3) ORDER BY b.code,l.name LIMIT 1000`, u.OrgID, u.ID, selectedBranch(r), archived)
+	return s.rows(w, r, `SELECT l.id,l.name,l.building,l.floor,l.room,l.branch_id,b.name AS branch_name,b.code AS branch_code,l.deleted_at FROM locations l JOIN branches b ON b.id=l.branch_id WHERE l.org_id=$1 AND (($4::boolean AND l.deleted_at IS NOT NULL) OR (NOT $4::boolean AND l.deleted_at IS NULL)) AND b.deleted_at IS NULL AND can_access_branch(l.org_id,$2,l.branch_id) AND ($3::bigint=0 OR l.branch_id=$3) ORDER BY b.code,l.name LIMIT 1000`, u.OrgID, u.ID, selectedBranch(r), archived)
 }
 func (s *Server) createLocation(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Name   string `json:"name"`
-		Branch int64  `json:"branch_id"`
+		Name     string `json:"name"`
+		Branch   int64  `json:"branch_id"`
+		Building string `json:"building"`
+		Floor    string `json:"floor"`
+		Room     string `json:"room"`
 	}
 	if e := decode(w, r, &in); e != nil {
 		return e
 	}
 	in.Name = strings.TrimSpace(in.Name)
-	if len(in.Name) < 2 || len(in.Name) > 100 {
+	if len(in.Name) < 2 || len(in.Name) > 100 || len(in.Building) > 100 || len(in.Floor) > 40 || len(in.Room) > 100 {
 		return fail(422, "Nama lokasi 2–100 karakter")
 	}
 	var n int64
@@ -101,7 +104,7 @@ func (s *Server) createLocation(w http.ResponseWriter, r *http.Request) error {
 		if e := branchScope(r, tx, in.Branch); e != nil {
 			return e
 		}
-		e := tx.QueryRow(r.Context(), `INSERT INTO locations(org_id,branch_id,name) VALUES($1,$2,$3) RETURNING id`, actor(r).OrgID, in.Branch, in.Name).Scan(&n)
+		e := tx.QueryRow(r.Context(), `INSERT INTO locations(org_id,branch_id,name,building,floor,room) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, actor(r).OrgID, in.Branch, in.Name, in.Building, in.Floor, in.Room).Scan(&n)
 		if e != nil {
 			return e
 		}

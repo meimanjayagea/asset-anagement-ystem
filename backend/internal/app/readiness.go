@@ -8,11 +8,11 @@ import (
 // CheckReadiness validates the schema and permissions needed to complete login.
 func (s *Server) CheckReadiness(ctx context.Context) error {
 	var versions int
-	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version IN (1,2,3,4,5,6)`).Scan(&versions); err != nil {
+	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version BETWEEN 1 AND 8`).Scan(&versions); err != nil {
 		return fmt.Errorf("schema unavailable; run migrate: %w", err)
 	}
-	if versions != 6 {
-		return fmt.Errorf("schema incomplete (%d/6); run migrate", versions)
+	if versions != 8 {
+		return fmt.Errorf("schema incomplete (%d/8); run migrate", versions)
 	}
 	for _, query := range []string{
 		`SELECT code FROM organizations LIMIT 0`,
@@ -22,6 +22,9 @@ func (s *Server) CheckReadiness(ctx context.Context) error {
 		`SELECT code,deleted_at FROM branches LIMIT 0`,
 		`SELECT org_id,actor_id,branch_id,related_branch_id,request_id,peer_ip,user_agent FROM audit_logs LIMIT 0`,
 		`SELECT identity_hash,attempted_employee_id,attempted_email FROM user_activity_logs LIMIT 0`,
+		`SELECT brand,model,rfid_tag,created_by,updated_by FROM assets LIMIT 0`,
+		`SELECT id,content FROM asset_photos LIMIT 0`,
+		`SELECT id,due_at,status FROM asset_loans LIMIT 0`,
 	} {
 		rows, err := s.DB.Query(ctx, query)
 		if err != nil {
@@ -39,6 +42,14 @@ func (s *Server) CheckReadiness(ctx context.Context) error {
 		has_table_privilege(current_user,'sessions','DELETE') AND
 		has_table_privilege(current_user,'audit_logs','INSERT') AND
 		has_table_privilege(current_user,'user_activity_logs','INSERT') AND
+		has_table_privilege(current_user,'asset_photos','INSERT') AND
+		has_table_privilege(current_user,'asset_photo_links','INSERT') AND
+		has_table_privilege(current_user,'asset_loans','INSERT') AND
+		has_table_privilege(current_user,'asset_loans','UPDATE') AND
+		has_table_privilege(current_user,'notification_receipts','INSERT') AND
+		has_table_privilege(current_user,'notification_receipts','UPDATE') AND
+		has_sequence_privilege(current_user,pg_get_serial_sequence('asset_photos','id'),'USAGE') AND
+		has_sequence_privilege(current_user,pg_get_serial_sequence('asset_loans','id'),'USAGE') AND
 		has_sequence_privilege(current_user,pg_get_serial_sequence('audit_logs','id'),'USAGE') AND
 		has_sequence_privilege(current_user,pg_get_serial_sequence('user_activity_logs','id'),'USAGE')`).Scan(&allowed)
 	if err != nil {

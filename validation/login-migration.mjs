@@ -31,7 +31,7 @@ fs.writeFileSync(root + "docs/login-upgrade.sql", bundle);
 function check(condition, message) {
   if (!condition) throw new Error(message);
 }
-for (const startingVersion of [0, 4, 5, 6]) {
+for (const startingVersion of [0, 2, 4, 5, 6, 8]) {
   const db = new PGlite();
   await db.waitReady;
   for (const migration of migrations.filter((m) => m.version <= startingVersion)) await db.exec(migration.sql);

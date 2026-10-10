@@ -55,7 +55,7 @@ func migrateDatabase(ctx context.Context, dsn string) error {
 	for _, migration := range []struct {
 		version int
 		file    string
-	}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}, {6, "006_employee_login.sql"}} {
+	}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}, {6, "006_employee_login.sql"}, {7, "007_field_lifecycle.sql"}, {8, "008_record_metadata.sql"}} {
 		var exists bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.version).Scan(&exists); err != nil {
 			return err
@@ -74,6 +74,6 @@ func migrateDatabase(ctx context.Context, dsn string) error {
 	if err = tx.Commit(ctx); err != nil {
 		return err
 	}
-	slog.Info("migrations complete", "version", 6)
+	slog.Info("migrations complete", "version", 8)
 	return nil
 }

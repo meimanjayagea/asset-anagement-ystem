@@ -21,6 +21,9 @@ export interface LoginOrganization {
   name: string;
 }
 export interface Asset {
+  cover_photo_id?: number | null;
+  brand: string;
+  model: string;
   id: number;
   tag: string;
   name: string;

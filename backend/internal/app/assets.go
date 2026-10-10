@@ -10,6 +10,9 @@ import (
 )
 
 type Asset struct {
+	CoverPhoto      *int64  `json:"cover_photo_id"`
+	Brand           string  `json:"brand"`
+	Model           string  `json:"model"`
 	ID              int64   `json:"id"`
 	Tag             string  `json:"tag"`
 	Name            string  `json:"name"`
@@ -55,7 +58,7 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "assets.archive")
 	// Window count keeps page and count in the same PostgreSQL snapshot.
-	rows, e := s.DB.Query(r.Context(), `SELECT a.id,a.tag,a.name,a.serial_number,a.category_id,a.location_id,a.custodian,a.status,a.purchase_date::text,a.purchase_cost,a.salvage_value,a.useful_life_months,a.warranty_until::text,a.version,c.name,l.name,l.branch_id,b.name,a.next_maintenance_date::text,a.deleted_at::text,count(*) OVER(),a.supplier_name,a.acquisition_reference,a.depreciation_method,a.depreciation_start_date::text,COALESCE((SELECT v.revalued_amount FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.purchase_cost),COALESCE((SELECT v.remaining_life_months FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.useful_life_months),COALESCE((SELECT v.effective_date::text FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.depreciation_start_date::text) FROM assets a JOIN categories c ON c.id=a.category_id AND c.org_id=a.org_id AND c.deleted_at IS NULL JOIN locations l ON l.id=a.location_id AND l.org_id=a.org_id AND l.deleted_at IS NULL JOIN branches b ON b.id=l.branch_id AND b.deleted_at IS NULL WHERE a.org_id=$1 AND (($8::boolean AND a.deleted_at IS NOT NULL) OR (NOT $8::boolean AND a.deleted_at IS NULL)) AND can_access_branch(a.org_id,$6,l.branch_id) AND ($7::bigint=0 OR l.branch_id=$7) AND ($2='' OR a.name ILIKE '%'||$2||'%' OR a.tag ILIKE '%'||$2||'%' OR a.serial_number ILIKE '%'||$2||'%') AND ($3='' OR a.status=$3) ORDER BY a.id DESC LIMIT $4 OFFSET $5`, u.OrgID, search, status, size, (p-1)*size, u.ID, selectedBranch(r), archived, time.Now().In(financeZone).Format("2006-01-02"))
+	rows, e := s.DB.Query(r.Context(), `SELECT a.id,a.tag,a.name,a.serial_number,a.category_id,a.location_id,a.custodian,a.status,a.purchase_date::text,a.purchase_cost,a.salvage_value,a.useful_life_months,a.warranty_until::text,a.version,c.name,l.name,l.branch_id,b.name,a.next_maintenance_date::text,a.deleted_at::text,count(*) OVER(),a.supplier_name,a.acquisition_reference,a.depreciation_method,a.depreciation_start_date::text,COALESCE((SELECT v.revalued_amount FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.purchase_cost),COALESCE((SELECT v.remaining_life_months FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.useful_life_months),COALESCE((SELECT v.effective_date::text FROM asset_valuations v WHERE v.org_id=a.org_id AND v.asset_id=a.id AND v.status='approved' AND v.effective_date<=$9::date ORDER BY v.effective_date DESC,v.id DESC LIMIT 1),a.depreciation_start_date::text),a.brand,a.model,(SELECT p.id FROM asset_photos p WHERE p.org_id=a.org_id AND p.asset_id=a.id AND p.purpose='catalog' ORDER BY p.id LIMIT 1) FROM assets a JOIN categories c ON c.id=a.category_id AND c.org_id=a.org_id AND c.deleted_at IS NULL JOIN locations l ON l.id=a.location_id AND l.org_id=a.org_id AND l.deleted_at IS NULL JOIN branches b ON b.id=l.branch_id AND b.deleted_at IS NULL WHERE a.org_id=$1 AND (($8::boolean AND a.deleted_at IS NOT NULL) OR (NOT $8::boolean AND a.deleted_at IS NULL)) AND can_access_branch(a.org_id,$6,l.branch_id) AND ($7::bigint=0 OR l.branch_id=$7) AND ($2='' OR a.name ILIKE '%'||$2||'%' OR a.tag ILIKE '%'||$2||'%' OR a.serial_number ILIKE '%'||$2||'%') AND ($3='' OR a.status=$3) ORDER BY a.id DESC LIMIT $4 OFFSET $5`, u.OrgID, search, status, size, (p-1)*size, u.ID, selectedBranch(r), archived, time.Now().In(financeZone).Format("2006-01-02"))
 	if e != nil {
 		return e
 	}
@@ -67,7 +70,7 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) error {
 		var basisCost int64
 		var basisLife int
 		var basisDate string
-		e = rows.Scan(&a.ID, &a.Tag, &a.Name, &a.Serial, &a.Category, &a.Location, &a.Custodian, &a.Status, &a.PurchaseDate, &a.Cost, &a.Salvage, &a.Life, &a.Warranty, &a.Version, &a.CategoryName, &a.LocationName, &a.BranchID, &a.BranchName, &a.NextMaintenance, &a.DeletedAt, &total, &a.Supplier, &a.AcquisitionRef, &a.Depreciation, &a.DepStart, &basisCost, &basisLife, &basisDate)
+		e = rows.Scan(&a.ID, &a.Tag, &a.Name, &a.Serial, &a.Category, &a.Location, &a.Custodian, &a.Status, &a.PurchaseDate, &a.Cost, &a.Salvage, &a.Life, &a.Warranty, &a.Version, &a.CategoryName, &a.LocationName, &a.BranchID, &a.BranchName, &a.NextMaintenance, &a.DeletedAt, &total, &a.Supplier, &a.AcquisitionRef, &a.Depreciation, &a.DepStart, &basisCost, &basisLife, &basisDate, &a.Brand, &a.Model, &a.CoverPhoto)
 		if e != nil {
 			return e
 		}
@@ -111,6 +114,13 @@ func (s *Server) createAsset(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	in.Tag = strings.ToUpper(strings.TrimSpace(in.Tag))
+	if in.Tag == "" {
+		code, err := token()
+		if err != nil {
+			return err
+		}
+		in.Tag = "AST-" + strings.ToUpper(code[:16])
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	in.Serial = strings.TrimSpace(in.Serial)
 	in.Supplier = strings.TrimSpace(in.Supplier)
@@ -262,7 +272,7 @@ func (s *Server) updateAsset(w http.ResponseWriter, r *http.Request) error {
 		structuralChange := in.Location != before.Location || in.Category != before.Category || in.Date != before.PurchaseDate || in.Method != before.Depreciation || in.DepStart != before.DepStart
 		if structuralChange {
 			var active bool
-			e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress')) OR EXISTS(SELECT 1 FROM stocktake_items i JOIN stocktakes st ON st.id=i.stocktake_id WHERE i.org_id=$1 AND i.asset_id=$2 AND st.status='open')`, u.OrgID, n).Scan(&active)
+			e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress')) OR EXISTS(SELECT 1 FROM asset_loans WHERE org_id=$1 AND asset_id=$2 AND status IN ('pending','checked_out')) OR EXISTS(SELECT 1 FROM stocktake_items i JOIN stocktakes st ON st.id=i.stocktake_id WHERE i.org_id=$1 AND i.asset_id=$2 AND st.status='open')`, u.OrgID, n).Scan(&active)
 			if e != nil {
 				return e
 			}
@@ -323,7 +333,7 @@ func (s *Server) assetAction(w http.ResponseWriter, r *http.Request) error {
 			return fail(409, "Transisi status tidak diizinkan")
 		}
 		var pending bool
-		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress'))`, actor(r).OrgID, n).Scan(&pending)
+		e = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM requests WHERE org_id=$1 AND asset_id=$2 AND status='pending') OR EXISTS(SELECT 1 FROM maintenance WHERE org_id=$1 AND asset_id=$2 AND status IN ('scheduled','in_progress')) OR EXISTS(SELECT 1 FROM asset_loans WHERE org_id=$1 AND asset_id=$2 AND status IN ('pending','checked_out'))`, actor(r).OrgID, n).Scan(&pending)
 		if e != nil {
 			return e
 		}

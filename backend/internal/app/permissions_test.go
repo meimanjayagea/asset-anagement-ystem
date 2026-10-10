@@ -42,7 +42,7 @@ func TestRoleCapabilityBoundaries(t *testing.T) {
 		{"employee", "requests.create", true},
 		{"employee", "requests.decide", false},
 		{"auditor", "assets.read", true},
-		{"auditor", "audit.read", false},
+		{"auditor", "audit.read", true},
 	}
 	for _, check := range checks {
 		if got := hasCapability(check.role, check.capability); got != check.want {

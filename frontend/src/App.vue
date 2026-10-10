@@ -40,6 +40,9 @@ import {
   Pencil,
 } from "lucide-vue-next";
 import FinanceWorkspace from "./FinanceWorkspace.vue";
+import LifecycleWorkspace from "./LifecycleWorkspace.vue";
+import PhotoUploader from "./PhotoUploader.vue";
+import NotificationBell from "./NotificationBell.vue";
 import {
   api,
   ApiError,
@@ -104,10 +107,12 @@ function copy(id: string, en: string) {
   return locale.value === "id" ? id : en;
 }
 const canWrite = computed(() => can("assets.write"));
+const uploadingPhoto=ref(false);
 const nav = computed(() =>
   [
     { key: "dashboard", label: t("nav.dashboard"), icon: LayoutDashboard, cap: "dashboard.read" },
     { key: "assets", label: t("nav.assets"), icon: Boxes, cap: "assets.read" },
+    { key: "lifecycle", label: copy("Siklus aset", "Asset lifecycle"), icon: Boxes, cap: "assets.read" },
     { key: "requests", label: t("nav.requests"), icon: ArrowLeftRight, cap: "requests.read" },
     { key: "maintenance", label: t("nav.maintenance"), icon: Wrench, cap: "maintenance.read" },
     { key: "stocktakes", label: t("nav.stocktakes"), icon: ClipboardCheck, cap: "stocktakes.read" },
@@ -227,7 +232,7 @@ async function load() {
   stats.value = {};
   total.value = 0;
   try {
-    if (view === "finance") {
+    if (view === "finance" || view === "lifecycle") {
       return;
     } else if (view === "dashboard") {
       const [summary, data] = await Promise.all([
@@ -300,6 +305,7 @@ async function signIn() {
     });
     me.value = signedIn;
     branch.value = signedIn.active_branch_id;
+    if(new URLSearchParams(location.search).has('asset_tag'))page.value='lifecycle';
     login.password = "";
     showArchived.value = false;
     await loadAssignableRoles();
@@ -349,8 +355,9 @@ async function filter() {
 }
 async function changeBranch() {
   current.value = 1;
-  await masters();
-  await load();
+  loading.value=true;
+  try { await masters(); await load(); }
+  catch(e) {error.value=(e as Error).message;loading.value=false;}
 }
 function open(kind: string, a: Asset | null = null) {
   error.value = "";
@@ -399,6 +406,8 @@ function open(kind: string, a: Asset | null = null) {
       version: a?.version,
       kind: "transfer",
       disposal_proceeds: 0,
+      photo_ids: [],
+      disposal_method: "write_off",
       target_location_id: locations.value.find((l) => l.id !== a?.location_id)
         ?.id,
       reason: "",
@@ -412,7 +421,7 @@ function open(kind: string, a: Asset | null = null) {
     };
   if (kind === "branch") form.value = { code: "", name: "", address: "" };
   if (kind === "location")
-    form.value = { name: "", branch_id: branch.value || branches.value[0]?.id };
+    form.value = { name: "", branch_id: branch.value || branches.value[0]?.id, building: '', floor: '', room: '' };
   if (kind === "category")
     form.value = {
       name: "",
@@ -519,7 +528,7 @@ async function submit() {
         break;
       case "request":
         endpoint = "/requests";
-        if (body.kind === "dispose") body.target_location_id = null;
+        if (body.kind === "dispose") {body.target_location_id = null;if(body.disposal_method!=='sale')body.disposal_proceeds=0;}
         else body.disposal_proceeds = 0;
         break;
       case "maintenance":
@@ -536,6 +545,9 @@ async function submit() {
           version: body.version,
           cost: body.cost || 0,
           notes: body.notes || "",
+          photo_ids: body.photo_ids || [],
+          checklist: body.checklist || [],
+          parts: [],
         };
         break;
       case "return":
@@ -602,7 +614,7 @@ function decision(r: any, approve: boolean) {
 }
 function maintenanceAction(r: any, action: string) {
   open(action);
-  form.value = { id: r.id, version: r.asset_version, cost: 0, notes: "" };
+  form.value = { id: r.id, asset_id: r.asset_id, version: r.asset_version, cost: 0, notes: "", photo_ids: [], checklist: (r.checklist || []).map((item: any) => ({...item, done: false})) };
 }
 async function exportCSV() {
   saving.value = true;
@@ -736,6 +748,7 @@ onMounted(async () => {
     const sessionUser = await api<User>("/me");
     me.value = sessionUser;
     branch.value = sessionUser.active_branch_id;
+    if(new URLSearchParams(location.search).has('asset_tag'))page.value='lifecycle';
     await masters();
     await loadAssignableRoles();
     await load();
@@ -813,7 +826,7 @@ onUnmounted(() => {
             maxlength="72"
           /></label>
           <div v-if="error" class="alert" role="alert">{{ error }}</div>
-          <button class="primary" :disabled="saving">
+          <button class="primary" :disabled="saving||uploadingPhoto">
             {{ saving ? t("login.processing") : t("login.submit") }}
             <ArrowUpRight :size="17" />
           </button>
@@ -891,6 +904,7 @@ onUnmounted(() => {
             </p>
           </div>
           <div class="buttons">
+            <NotificationBell :branch-id="branch" />
             <select
               v-if="me.all_branches || me.branch_ids.length > 1"
               class="branch-filter"
@@ -1199,6 +1213,7 @@ onUnmounted(() => {
             </div></section
         ></template>
         <FinanceWorkspace v-else-if="page === 'finance'" :branch-id="branch" :user-id="me.id" :finance="can('finance.read')" :can-manage="can('finance.manage')" :can-propose="can('valuation.propose')" :can-decide="can('valuation.decide')" :contracts-read="can('contracts.read')" :contracts-manage="can('contracts.manage')" :locale="locale" />
+        <LifecycleWorkspace v-else-if="page === 'lifecycle'" :branch-id="branch" :user="me" />
         <section v-else class="panel">
           <div v-if="page === 'activity'" class="filters">
             <select
@@ -1667,7 +1682,7 @@ onUnmounted(() => {
         <button
           class="icon"
           @click="modal = ''"
-          :disabled="saving"
+          :disabled="saving||uploadingPhoto"
           :aria-label="copy('Tutup', 'Close')"
         >
           <X :size="20" />
@@ -1693,7 +1708,7 @@ onUnmounted(() => {
               maxlength="1000"
             ></textarea></label></template
         ><template v-if="modal === 'location'"
-          ><label
+          ><label>Gedung<input v-model="form.building" maxlength="100" /></label><label>Lantai<input v-model="form.floor" maxlength="40" /></label><label>Ruangan<input v-model="form.room" maxlength="100" /></label><label
             >{{ t("common.branch") }}<select v-model.number="form.branch_id" required>
               <option v-for="b in branches" :key="b.id" :value="b.id">
                 {{ b.code }} · {{ b.name }}
@@ -1896,9 +1911,8 @@ onUnmounted(() => {
             <label
               >{{ t("asset.tag") }}<input
                 v-model="form.tag"
-                required
                 maxlength="80"
-                placeholder="AST-000001" /></label
+                placeholder="AST-000001" :required="modal === 'editAsset'" /></label
             ><label
               >{{ copy("Nama", "Name") }}<input
                 v-model="form.name"
@@ -2014,7 +2028,8 @@ onUnmounted(() => {
               required
             ></textarea>
           </label>
-          <label v-if="form.kind === 'dispose' && can('assets.finance')">{{ locale === "id" ? "Hasil pelepasan (Rp)" : "Disposal proceeds (IDR)" }}<input v-model.number="form.disposal_proceeds" type="number" min="0" max="1000000000000000" step="1" required /></label>
+          <label v-if="form.kind === 'dispose' && form.disposal_method==='sale' && can('assets.finance')">{{ locale === "id" ? "Hasil pelepasan (Rp)" : "Disposal proceeds (IDR)" }}<input v-model.number="form.disposal_proceeds" type="number" min="0" max="1000000000000000" step="1" required /></label>
+          <label v-if="form.kind === 'dispose'">Metode<select v-model="form.disposal_method"><option value="write_off">Pengafkiran</option><option value="sale">Penjualan</option><option value="abandonment">Peninggalan</option></select></label><PhotoUploader v-if="form.kind === 'dispose'" :asset-id="form.asset_id" purpose="disposal" v-model="form.photo_ids" @busy="uploadingPhoto=$event" />
           <p class="hint">
             {{ copy("Perubahan berlaku setelah disetujui oleh admin atau manajer lain.", "Changes take effect after approval by a different administrator or manager.") }}
           </p></template
@@ -2079,7 +2094,9 @@ onUnmounted(() => {
             maxlength="1000"
           ></textarea></label
         ><template v-if="modal === 'complete'"
-          ><label
+          ><PhotoUploader :asset-id="form.asset_id" purpose="repair" v-model="form.photo_ids" @busy="uploadingPhoto=$event" />
+          <label v-for="item in form.checklist" :key="item.label"><input v-model="item.done" type="checkbox" required />{{ item.label }}</label>
+          <label
             >{{ copy("Biaya aktual (Rp)", "Actual cost (IDR)") }}<input
               v-model.number="form.cost"
               type="number"
@@ -2102,13 +2119,13 @@ onUnmounted(() => {
             type="button"
             class="secondary"
             @click="modal = ''"
-            :disabled="saving"
+            :disabled="saving||uploadingPhoto"
           >
             {{ t("common.cancel") }}</button
           ><button
             v-if="modal !== 'stocktakeItems' && modal !== 'history'"
             class="primary"
-            :disabled="saving"
+            :disabled="saving||uploadingPhoto"
           >
             {{ saving ? copy("Menyimpan…", "Saving…") : copy("Simpan & konfirmasi", "Save & confirm") }}
           </button>

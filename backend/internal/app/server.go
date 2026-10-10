@@ -129,6 +129,20 @@ func (s *Server) Routes() http.Handler {
 	add("POST /api/logout", "", s.logout)
 	add("GET /api/dashboard", "dashboard.read", s.dashboard)
 	add("GET /api/assets", "assets.read", s.listAssets)
+	add("GET /api/assets/lookup", "assets.read", s.lookupAsset)
+	add("GET /api/assets/{id}/catalog", "assets.read", s.catalogDetail)
+	add("POST /api/assets/{id}/catalog", "assets.write", s.updateCatalog)
+	add("GET /api/assets/{id}/photos", "assets.read", s.assetPhotos)
+	add("POST /api/assets/{id}/photos", "photos.write", s.uploadPhoto)
+	add("GET /api/photos/{id}", "assets.read", s.photoContent)
+	add("GET /api/loans", "loans.read", s.listLoans)
+	add("POST /api/loans", "loans.request", s.requestLoan)
+	add("POST /api/loans/{id}/action", "loans.read", s.loanAction)
+	add("GET /api/notifications", "assets.read", s.notifications)
+	add("GET /api/maintenance/planned", "maintenance.read", s.plannedMaintenance)
+	add("GET /api/maintenance/assignees", "maintenance.manage", s.maintenanceAssignees)
+	add("POST /api/notifications/read", "assets.read", s.readNotification)
+	add("GET /api/reports/lifecycle", "reports.read", s.lifecycleReport)
 	add("GET /api/assets/{id}/history", "assets.history", s.assetHistory)
 	add("POST /api/assets", "assets.write", s.createAsset)
 	add("POST /api/assets/{id}", "assets.write", s.updateAsset)
@@ -137,6 +151,7 @@ func (s *Server) Routes() http.Handler {
 	add("POST /api/assets/{id}/restore", "assets.archive", s.restoreAsset)
 	add("GET /api/locations", "locations.read", s.listLocations)
 	add("POST /api/locations", "locations.manage", s.createLocation)
+	add("POST /api/locations/{id}/details", "locations.manage", s.locationDetails)
 	add("DELETE /api/locations/{id}", "locations.archive", s.archiveLocation)
 	add("POST /api/locations/{id}/restore", "locations.archive", s.restoreLocation)
 	add("GET /api/categories", "categories.read", s.listCategories)
@@ -148,6 +163,7 @@ func (s *Server) Routes() http.Handler {
 	add("POST /api/requests/{id}/decision", "requests.decide", s.decideRequest)
 	add("GET /api/maintenance", "maintenance.read", s.listMaintenance)
 	add("POST /api/maintenance", "maintenance.manage", s.createMaintenance)
+	add("POST /api/repairs", "maintenance.request", s.createMaintenance)
 	add("POST /api/maintenance/{id}/action", "maintenance.manage", s.maintenanceAction)
 	add("GET /api/audit", "audit.read", s.auditList)
 	add("GET /api/users", "users.read", s.listUsers)
@@ -452,6 +468,9 @@ func (s *Server) transaction(r *http.Request, f func(pgx.Tx) error) error {
 		return e
 	}
 	defer tx.Rollback(r.Context())
+	if _, e = tx.Exec(r.Context(), `SELECT set_config('app.actor_id',$1,true)`, strconv.FormatInt(actor(r).ID, 10)); e != nil {
+		return e
+	}
 	if e = f(tx); e != nil {
 		return e
 	}
