@@ -60,7 +60,7 @@ const me = ref<User | null>(null),
   page = ref("dashboard"),
   modal = ref(""),
   selected = ref<Asset | null>(null);
-const login = reactive({ email: "", password: "", org_code: "", branch_id: 0 }),
+const login = reactive({ employee_id: "", password: "", org_code: "" }),
   loginOrganizations = ref<LoginOrganization[]>([]),
   roleOptions = ref<RoleOption[]>([]),
   stats = ref<Record<string, number>>({}),
@@ -77,11 +77,6 @@ const branches = ref<any[]>([]),
   showArchived = ref(false),
   activityEvent = ref(""),
   historyRecords = ref<any[]>([]);
-const loginOrganization = computed(() => {
-  const code = login.org_code.trim().toUpperCase();
-  return loginOrganizations.value.find((organization) => organization.code === code);
-});
-const loginBranches = computed(() => loginOrganization.value?.branches || []);
 const assetLocations = computed(() =>
   locations.value.filter((l) => l.branch_id === form.value.asset_branch_id),
 );
@@ -123,12 +118,6 @@ const nav = computed(() =>
     { key: "users", label: t("nav.users"), icon: Users, cap: "users.read" },
     { key: "finance", label: t("nav.finance"), icon: Landmark, cap: can("finance.read") ? "finance.read" : "reports.read", show: can("finance.read") || can("reports.read") },
   ].filter((item: any) => item.show !== false && can(item.cap)),
-);
-watch(
-  () => login.org_code,
-  () => {
-    login.branch_id = 0;
-  },
 );
 watch(
   () => form.value.role,
@@ -304,10 +293,9 @@ async function signIn() {
   error.value = "";
   try {
     const signedIn = await api<User>("/login", {
-      email: login.email,
+      employee_id: login.employee_id,
       password: login.password,
       org_code: login.org_code,
-      branch_id: login.branch_id,
     });
     me.value = signedIn;
     branch.value = signedIn.active_branch_id;
@@ -564,7 +552,8 @@ async function submit() {
         };
         break;
     }
-    await api(endpoint, body);
+    const createdUser = modal.value === "user";
+    const result = await api<{ employee_id?: string }>(endpoint, body);
     if (modal.value === "password") {
       me.value = null;
       modal.value = "";
@@ -572,7 +561,11 @@ async function submit() {
       return;
     }
     modal.value = "";
-    notify(copy("Perubahan berhasil disimpan", "Changes saved successfully"));
+    notify(
+      createdUser && result?.employee_id
+        ? copy(`Pengguna dibuat. ID karyawan: ${result.employee_id}`, `User created. Employee ID: ${result.employee_id}`)
+        : copy("Perubahan berhasil disimpan", "Changes saved successfully"),
+    );
     await masters();
     await load();
   } catch (e) {
@@ -798,20 +791,11 @@ onUnmounted(() => {
               :label="organization.name"
             />
           </datalist>
-          <label>{{ t("login.branch") }}<select v-model.number="login.branch_id" required :disabled="!loginOrganization">
-              <option :value="0" disabled>{{ copy("Masukkan kode organisasi terlebih dahulu", "Enter an organization code first") }}</option>
-              <option
-                v-for="item in loginBranches"
-                :key="item.id"
-                :value="item.id"
-              >
-                {{ item.code }} · {{ item.name }}
-              </option>
-            </select></label>
-          <label>{{ t("login.email") }}<input
-            v-model="login.email"
-            type="email"
+          <label>{{ t("login.employee") }}<input
+            v-model.trim="login.employee_id"
+            type="text"
             autocomplete="username"
+            :placeholder="copy('Contoh: EMP-1', 'Example: EMP-1')"
             required
           /></label>
           <label>{{ t("login.password") }}<input
@@ -1385,7 +1369,7 @@ onUnmounted(() => {
                   <td>
                     {{ timestamp(r.created_at)
                     }}<small>{{
-                      r.actor_name || r.attempted_email || copy("Tidak terautentikasi", "Unauthenticated")
+                      r.actor_name || r.attempted_employee_id || r.attempted_email || copy("Tidak terautentikasi", "Unauthenticated")
                     }}</small>
                   </td>
                   <td>{{ r.event }}</td>
@@ -1483,6 +1467,7 @@ onUnmounted(() => {
               <thead>
                 <tr>
                   <th>{{ copy("Nama", "Name") }}</th>
+                  <th>{{ t("login.employee") }}</th>
                   <th>Email</th>
                   <th>{{ copy("Peran", "Role") }}</th>
                   <th>{{ t("common.status") }}</th>
@@ -1493,6 +1478,7 @@ onUnmounted(() => {
               <tbody>
                 <tr v-for="r in records" :key="r.id">
                   <td>{{ r.name }}</td>
+                  <td>{{ r.employee_id }}</td>
                   <td>{{ r.email }}</td>
                   <td>
                     <span class="badge">{{ roleLabel(r.role) }}</span>

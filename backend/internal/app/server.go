@@ -39,6 +39,7 @@ type User struct {
 	Organization   string   `json:"organization_name"`
 	Name           string   `json:"name"`
 	Email          string   `json:"email"`
+	EmployeeID     string   `json:"employee_id"`
 	Role           string   `json:"role"`
 	AllBranches    bool     `json:"all_branches"`
 	BranchIDs      []int64  `json:"branch_ids"`
@@ -189,7 +190,7 @@ func (s *Server) auth(capability string, h func(http.ResponseWriter, *http.Reque
 			return
 		}
 		var u User
-		e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.role,u.all_branches,s.active_branch_id,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.org_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active AND u.deleted_at IS NULL`, hash(c.Value)).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.Role, &u.AllBranches, &u.ActiveBranchID, &u.BranchIDs)
+		e = s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.employee_id,u.role,u.all_branches,s.active_branch_id,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM sessions s JOIN users u ON u.id=s.user_id JOIN organizations o ON o.id=u.org_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.active AND u.deleted_at IS NULL`, hash(c.Value)).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.EmployeeID, &u.Role, &u.AllBranches, &u.ActiveBranchID, &u.BranchIDs)
 		if e != nil {
 			if errors.Is(e, pgx.ErrNoRows) {
 				report(w, fail(401, "Sesi berakhir"))
@@ -233,39 +234,25 @@ func (s *Server) auth(capability string, h func(http.ResponseWriter, *http.Reque
 	})
 }
 func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
-	rows, e := s.DB.Query(r.Context(), `SELECT o.id,o.code,o.name,b.id,b.code,b.name FROM organizations o JOIN branches b ON b.org_id=o.id AND b.deleted_at IS NULL ORDER BY o.id,b.code`)
+	rows, e := s.DB.Query(r.Context(), `SELECT id,code,name FROM organizations ORDER BY id`)
 	if e != nil {
 		report(w, e)
 		return
 	}
 	defer rows.Close()
-	type branchOption struct {
+	type organizationOption struct {
 		ID   int64  `json:"id"`
 		Code string `json:"code"`
 		Name string `json:"name"`
 	}
-	type organizationOption struct {
-		ID       int64          `json:"id"`
-		Code     string         `json:"code"`
-		Name     string         `json:"name"`
-		Branches []branchOption `json:"branches"`
-	}
 	orgs := []organizationOption{}
-	indexes := map[int64]int{}
 	for rows.Next() {
-		var orgID, branchID int64
-		var orgCode, orgName, code, branchName string
-		if e = rows.Scan(&orgID, &orgCode, &orgName, &branchID, &code, &branchName); e != nil {
+		var org organizationOption
+		if e = rows.Scan(&org.ID, &org.Code, &org.Name); e != nil {
 			report(w, e)
 			return
 		}
-		index, ok := indexes[orgID]
-		if !ok {
-			index = len(orgs)
-			indexes[orgID] = index
-			orgs = append(orgs, organizationOption{ID: orgID, Code: orgCode, Name: orgName, Branches: []branchOption{}})
-		}
-		orgs[index].Branches = append(orgs[index].Branches, branchOption{ID: branchID, Code: code, Name: branchName})
+		orgs = append(orgs, org)
 	}
 	if e = rows.Err(); e != nil {
 		report(w, e)
@@ -275,17 +262,16 @@ func (s *Server) loginOptions(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		OrgCode  string `json:"org_code"`
-		OrgID    int64  `json:"org_id"`
-		BranchID int64  `json:"branch_id"`
+		EmployeeID string `json:"employee_id"`
+		Password   string `json:"password"`
+		OrgCode    string `json:"org_code"`
+		OrgID      int64  `json:"org_id"`
 	}
 	if e := decode(w, r, &in); e != nil {
 		report(w, e)
 		return
 	}
-	in.Email = strings.ToLower(strings.TrimSpace(in.Email))
+	in.EmployeeID = strings.ToUpper(strings.TrimSpace(in.EmployeeID))
 	in.OrgCode = strings.ToUpper(strings.TrimSpace(in.OrgCode))
 	if in.OrgCode != "" {
 		var orgID int64
@@ -305,22 +291,15 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		in.OrgID = orgID
 	}
 	meta(r.Context()).LoginOrg = in.OrgID
-	if in.BranchID > 0 {
-		meta(r.Context()).Branch = &in.BranchID
+	meta(r.Context()).IdentityHash = hash(in.EmployeeID)
+	if len(in.EmployeeID) <= 100 {
+		meta(r.Context()).AttemptedEmployeeID = in.EmployeeID
 	}
-	meta(r.Context()).EmailHash = hash(in.Email)
-	if len(in.Email) <= 254 {
-		meta(r.Context()).AttemptedEmail = in.Email
-	}
-	if len(in.Email) < 3 || len(in.Email) > 254 || len(in.Password) < 1 || len(in.Password) > 72 || in.OrgID < 1 || in.BranchID < 0 {
+	if len(in.EmployeeID) < 3 || len(in.EmployeeID) > 100 || len(in.Password) < 1 || len(in.Password) > 72 || in.OrgID < 1 {
 		report(w, fail(422, "Kredensial tidak valid"))
 		return
 	}
-	if in.BranchID < 1 {
-		report(w, fail(422, "Cabang wajib dipilih"))
-		return
-	}
-	key := fmt.Sprintf("%d:%s", in.OrgID, in.Email)
+	key := fmt.Sprintf("%d:%s", in.OrgID, in.EmployeeID)
 	s.mu.Lock()
 	now := time.Now()
 	a := s.attempts[key]
@@ -348,22 +327,18 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var u User
 	var pw string
-	e := s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.role,u.password_hash,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.org_id=$1 AND u.email=$2 AND u.active AND u.deleted_at IS NULL`, in.OrgID, in.Email).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.Role, &pw, &u.AllBranches, &u.BranchIDs)
+	e := s.DB.QueryRow(r.Context(), `SELECT u.id,u.org_id,o.name,u.name,u.email,u.employee_id,u.role,u.password_hash,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) FROM users u JOIN organizations o ON o.id=u.org_id WHERE u.org_id=$1 AND u.employee_id=$2 AND u.active AND u.deleted_at IS NULL`, in.OrgID, in.EmployeeID).Scan(&u.ID, &u.OrgID, &u.Organization, &u.Name, &u.Email, &u.EmployeeID, &u.Role, &pw, &u.AllBranches, &u.BranchIDs)
 	if e != nil || bcrypt.CompareHashAndPassword([]byte(pw), []byte(in.Password)) != nil {
 		report(w, fail(401, "Kredensial tidak valid"))
 		return
 	}
 	u.Capabilities = capabilitiesForRole(u.Role)
-	u.ActiveBranchID = in.BranchID
-	var allowed bool
-	e = s.DB.QueryRow(r.Context(), `SELECT can_access_branch($1,$2,$3)`, u.OrgID, u.ID, u.ActiveBranchID).Scan(&allowed)
-	if e != nil {
-		report(w, e)
-		return
-	}
-	if !allowed {
-		report(w, fail(403, "Email ini tidak terdaftar pada cabang yang dipilih"))
-		return
+	if !u.AllBranches {
+		if len(u.BranchIDs) == 0 {
+			report(w, fail(403, "Akun tidak memiliki akses ke cabang aktif"))
+			return
+		}
+		u.ActiveBranchID = u.BranchIDs[0]
 	}
 	meta(r.Context()).User = &u
 	if u.ActiveBranchID > 0 {

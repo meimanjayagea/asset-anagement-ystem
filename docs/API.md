@@ -52,7 +52,7 @@ Errors: `{"error":"message"}`. HTTP 400 malformed JSON, 401 unauthenticated/sess
 | POST | /categories/{id}/policy | Admin, versioned policy update |
 | GET | /audit?page=1&size=25 | Admin/manager/auditor |
 | GET | /users | Admin, max 1000 |
-| POST | /users | Admin, created id |
+| POST | /users | Admin, created id and employee_id |
 | POST | /users/{id}/access | Admin, revoke sessions |
 
 Pagination size clamps to 1–100 (default 25); page starts at 1. General arrays do not return total count; next page determined by returned length. Missing stocktake ID GET items currently returns empty array, write returns 404.
@@ -61,10 +61,10 @@ Pagination size clamps to 1–100 (default 25); page starts at 1. General arrays
 
 Login:
 ```json
-{"email":"admin@example.com","password":"your-unique-password","org_code":"ORG-000001","branch_id":1}
+{"employee_id":"EMP-1","password":"your-unique-password","org_code":"ORG-000001"}
 ```
 
-Kode organisasi diperoleh saat bootstrap dan dicantumkan pada log bootstrap. Cabang harus dipilih; login hanya berhasil jika akun memiliki akses ke cabang tersebut. Email yang tidak terdaftar pada cabang terpilih menerima HTTP 403.
+Kode organisasi dan ID karyawan diperoleh saat bootstrap (keduanya dicantumkan pada log bootstrap). ID karyawan akun yang telah ada diturunkan otomatis dari ID pengguna dan tetap stabil. Akun dengan akses cabang terbatas mulai pada cabang aktif pertama sesuai urutan ID; admin pusat masuk dengan cakupan seluruh cabang. Server tetap memvalidasi akses cabang pada setiap permintaan. Email hanya dipakai untuk pembuatan/pengelolaan akun, bukan autentikasi. User creation returns `employee_id`; bagikan ID ini kepada pengguna secara aman.
 
 Register:
 ```json
@@ -124,6 +124,7 @@ Master / user:
 ```json
 {"name":"Checker","email":"checker@example.com","password":"strong-password-123","role":"manager","all_branches":false,"branch_ids":[1,2]}
 ```
+Email tetap wajib saat membuat akun. ID karyawan otomatis dibuat dan dikembalikan bersama ID pengguna.
 ```json
 {"role":"auditor","active":false,"all_branches":false,"branch_ids":[2]}
 ```
@@ -138,7 +139,7 @@ Create: HTTP 201 `{"id":123}`. Action: HTTP 200 `{"ok":true}`. IDs/version/nilai
 ```bash
 curl -c /tmp/assetflow.cookies http://localhost:8088/api/login \
  -H 'Content-Type: application/json' -H 'X-Requested-With: AssetFlow' \
- -d '{"org_code":"ORG-000001","branch_id":1,"email":"admin@example.com","password":"your-password"}'
+ -d '{"org_code":"ORG-000001","employee_id":"EMP-1","password":"your-password"}'
 curl -b /tmp/assetflow.cookies http://localhost:8088/api/dashboard
 rm -f /tmp/assetflow.cookies
 ```
@@ -163,7 +164,7 @@ GET dashboard/assets/locations/requests/maintenance/stocktakes/audit accepts `br
 
 User creation/access change requires `all_branches` and `branch_ids`. Admin is forced company-wide. Other users with `all_branches=false` must have at least one valid company branch. Access changes revoke all sessions. Asset registration chooses location; backend derives branch from its location (no caller-controlled branch override).
 
-Activity event values: login_success, login_failed, login_throttled, logout, read, action, denied. Each has timestamp/status/request ID/peer IP/user agent/duration. Failed login `attempted_email` describes submitted identity, not an authenticated actor. Unknown company attempts are retained with null company and available only to infrastructure/DB audit operators, not a company's activity UI.
+Activity event values: login_success, login_failed, login_throttled, logout, read, action, denied. Each has timestamp/status/request ID/peer IP/user agent/duration. Failed login `attempted_employee_id` describes submitted identity, not an authenticated actor. Unknown company attempts are retained with null company and available only to infrastructure/DB audit operators, not a company's activity UI.
 
 Audited CSV export:
 ```json

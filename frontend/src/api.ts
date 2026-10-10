@@ -4,6 +4,7 @@ export interface User {
   organization_name: string;
   name: string;
   email: string;
+  employee_id: string;
   role: string;
   all_branches: boolean;
   branch_ids: number[];
@@ -18,7 +19,6 @@ export interface LoginOrganization {
   id: number;
   code: string;
   name: string;
-  branches: { id: number; code: string; name: string }[];
 }
 export interface Asset {
   id: number;

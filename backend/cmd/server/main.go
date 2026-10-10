@@ -70,7 +70,7 @@ func run() error {
 		for _, migration := range []struct {
 			Version int
 			File    string
-		}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}} {
+		}{{1, "001_init.sql"}, {2, "002_branches_activity.sql"}, {3, "003_roles_scope_archive.sql"}, {4, "004_finance_lifecycle.sql"}, {5, "005_organization_codes.sql"}, {6, "006_employee_login.sql"}} {
 			var exists bool
 			if e = conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, migration.Version).Scan(&exists); e != nil {
 				return e
@@ -129,7 +129,8 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO users(org_id,email,name,password_hash,role,all_branches) VALUES($1,$2,'Administrator',$3,'admin',true)`, org, email, string(h))
+		var employeeID string
+		e = tx.QueryRow(ctx, `INSERT INTO users(org_id,email,name,password_hash,role,all_branches) VALUES($1,$2,'Administrator',$3,'admin',true) RETURNING employee_id`, org, email, string(h)).Scan(&employeeID)
 		if e != nil {
 			return e
 		}
@@ -149,7 +150,7 @@ func run() error {
 		if e = tx.Commit(ctx); e != nil {
 			return e
 		}
-		slog.Info("bootstrap complete", "org_id", org, "org_code", orgCode)
+		slog.Info("bootstrap complete", "org_id", org, "org_code", orgCode, "employee_id", employeeID)
 		return nil
 	}
 	origin := os.Getenv("APP_ORIGIN")

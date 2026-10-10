@@ -62,8 +62,10 @@ await db.exec(
 );
 await db.exec(fs.readFileSync(root + "/backend/migrations/004_finance_lifecycle.sql", "utf8"));
 await db.exec(fs.readFileSync(root + "/backend/migrations/005_organization_codes.sql", "utf8"));
-check((await db.query(`SELECT version FROM schema_migrations ORDER BY version`)).rows.length === 5, "all five migrations applied");
+await db.exec(fs.readFileSync(root + "/backend/migrations/006_employee_login.sql", "utf8"));
+check((await db.query(`SELECT version FROM schema_migrations ORDER BY version`)).rows.length === 6, "all six migrations applied");
 check((await db.query(`SELECT code FROM organizations WHERE id=1`)).rows[0].code === "ORG-000001", "organization code backfilled from id");
+check((await db.query(`SELECT employee_id FROM users WHERE id=1`)).rows[0].employee_id === "EMP-1", "existing users receive an employee ID");
 await db.exec(`INSERT INTO asset_movements(org_id,asset_id,actor_id,event,to_location_id,to_branch_id,note) VALUES(1,1,1,'registered',2,2,'seed');INSERT INTO asset_valuations(org_id,asset_id,branch_id,requested_by,effective_date,carrying_value_before,revalued_amount,remaining_life_months,reason,expected_version) VALUES(1,1,2,1,'2026-10-01',90,100,38,'Market review',1);INSERT INTO service_contracts(org_id,branch_id,asset_id,name,vendor,start_date,end_date,created_by) VALUES(1,2,1,'Support','Vendor','2026-01-01','2027-01-01',1);INSERT INTO accounting_profiles(org_id,updated_by) VALUES(1,1);`);
 check((await db.query(`SELECT depreciation_method FROM assets WHERE id=1`)).rows[0].depreciation_method === "straight_line", "legacy assets receive a safe depreciation default");
 check((await db.query(`SELECT count(*)::int n FROM asset_movements WHERE asset_id=1`)).rows[0].n === 1, "append-only movement timeline persists");

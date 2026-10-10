@@ -124,10 +124,6 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
           id: 1,
           code: "ORG-000001",
           name: "Example Corp",
-          branches: [
-            { id: 1, code: "HQ", name: "Headquarters" },
-            { id: 2, code: "BDG", name: "Bandung" },
-          ],
         }],
       };
     else if (path === "/api/user-roles")

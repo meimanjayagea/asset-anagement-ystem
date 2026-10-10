@@ -175,7 +175,7 @@ func (s *Server) listAssignableRoles(w http.ResponseWriter, r *http.Request) err
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "users.archive")
-	return s.rows(w, r, `SELECT u.id,u.name,u.email,u.role,u.active,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) AS branch_ids,u.deleted_at FROM users u WHERE u.org_id=$1 AND (($4::boolean AND u.deleted_at IS NOT NULL) OR (NOT $4::boolean AND u.deleted_at IS NULL)) AND ($2 OR EXISTS(SELECT 1 FROM user_branches target JOIN user_branches own ON own.org_id=target.org_id AND own.branch_id=target.branch_id WHERE target.org_id=u.org_id AND target.user_id=u.id AND own.user_id=$3)) ORDER BY u.id LIMIT 1000`, u.OrgID, u.AllBranches, u.ID, archived)
+	return s.rows(w, r, `SELECT u.id,u.name,u.email,u.employee_id,u.role,u.active,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) AS branch_ids,u.deleted_at FROM users u WHERE u.org_id=$1 AND (($4::boolean AND u.deleted_at IS NOT NULL) OR (NOT $4::boolean AND u.deleted_at IS NULL)) AND ($2 OR EXISTS(SELECT 1 FROM user_branches target JOIN user_branches own ON own.org_id=target.org_id AND own.branch_id=target.branch_id WHERE target.org_id=u.org_id AND target.user_id=u.id AND own.user_id=$3)) ORDER BY u.id LIMIT 1000`, u.OrgID, u.AllBranches, u.ID, archived)
 }
 func assignBranches(r *http.Request, tx pgx.Tx, user int64, all bool, branches []int64) error {
 	if !all && len(branches) == 0 {
@@ -257,8 +257,9 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	var n int64
+	var employeeID string
 	e = s.transaction(r, func(tx pgx.Tx) error {
-		e := tx.QueryRow(r.Context(), `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES($1,$2,$3,$4,$5,$6) RETURNING id`, actor(r).OrgID, in.Name, in.Email, string(pw), in.Role, in.All).Scan(&n)
+		e := tx.QueryRow(r.Context(), `INSERT INTO users(org_id,name,email,password_hash,role,all_branches) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,employee_id`, actor(r).OrgID, in.Name, in.Email, string(pw), in.Role, in.All).Scan(&n, &employeeID)
 		if e != nil {
 			return e
 		}
@@ -270,7 +271,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) error {
 	if e != nil {
 		return e
 	}
-	write(w, 201, map[string]int64{"id": n})
+	write(w, 201, map[string]any{"id": n, "employee_id": employeeID})
 	return nil
 }
 func uniqueCount(ids []int64) int {

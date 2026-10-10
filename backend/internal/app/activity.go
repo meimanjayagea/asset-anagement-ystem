@@ -12,10 +12,10 @@ import (
 
 type requestKey struct{}
 type requestMeta struct {
-	Branch, Related                          *int64
-	ID, IP, Agent, EmailHash, AttemptedEmail string
-	User                                     *User
-	LoginOrg                                 int64
+	Branch, Related                                               *int64
+	ID, IP, Agent, IdentityHash, AttemptedEmail, AttemptedEmployeeID string
+	User                                                          *User
+	LoginOrg                                                      int64
 }
 
 func meta(c context.Context) *requestMeta {
@@ -100,7 +100,7 @@ func (s *Server) recordActivity(r *http.Request, status int, duration time.Durat
 	if r.URL.Path == "/api/logout" && status < 400 {
 		event = "logout"
 	}
-	_, e := s.DB.Exec(r.Context(), `INSERT INTO user_activity_logs(org_id,actor_id,actor_name,actor_branch_ids,all_branches,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,email_hash,branch_id,related_branch_id,attempted_email) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, org, actorID, actorName, branches, all, event, r.Method, path, status, duration.Milliseconds(), m.ID, m.IP, m.Agent, m.EmailHash, m.Branch, m.Related, m.AttemptedEmail)
+	_, e := s.DB.Exec(r.Context(), `INSERT INTO user_activity_logs(org_id,actor_id,actor_name,actor_branch_ids,all_branches,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,identity_hash,branch_id,related_branch_id,attempted_email,attempted_employee_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, org, actorID, actorName, branches, all, event, r.Method, path, status, duration.Milliseconds(), m.ID, m.IP, m.Agent, m.IdentityHash, m.Branch, m.Related, m.AttemptedEmail, m.AttemptedEmployeeID)
 	return e
 }
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -175,5 +175,5 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 func (s *Server) listActivity(w http.ResponseWriter, r *http.Request) error {
 	p, z := page(r)
 	u := actor(r)
-	return s.rows(w, r, `SELECT id,actor_id,actor_name,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,created_at,branch_id,related_branch_id,attempted_email FROM user_activity_logs WHERE org_id=$1 AND ($2 OR can_access_branch(org_id,$3,branch_id) OR can_access_branch(org_id,$3,related_branch_id)) AND ($4='' OR event=$4) AND ($7::bigint=0 OR branch_id=$7 OR related_branch_id=$7) ORDER BY id DESC LIMIT $5 OFFSET $6`, u.OrgID, u.AllBranches, u.ID, r.URL.Query().Get("event"), z, (p-1)*z, selectedBranch(r))
+	return s.rows(w, r, `SELECT id,actor_id,actor_name,event,method,path,status_code,duration_ms,request_id,peer_ip,user_agent,created_at,branch_id,related_branch_id,attempted_email,attempted_employee_id FROM user_activity_logs WHERE org_id=$1 AND ($2 OR can_access_branch(org_id,$3,branch_id) OR can_access_branch(org_id,$3,related_branch_id)) AND ($4='' OR event=$4) AND ($7::bigint=0 OR branch_id=$7 OR related_branch_id=$7) ORDER BY id DESC LIMIT $5 OFFSET $6`, u.OrgID, u.AllBranches, u.ID, r.URL.Query().Get("event"), z, (p-1)*z, selectedBranch(r))
 }
