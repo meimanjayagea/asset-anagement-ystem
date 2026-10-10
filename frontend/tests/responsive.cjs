@@ -97,7 +97,10 @@ module.exports = async function responsive(page, check, directory) {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole("button", { name: "Open menu", exact: true }).click();
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator(".nav-backdrop").waitFor({ state: "hidden" });
+  await page.locator(".main:not([inert])").waitFor({ state: "visible" });
   check(await page.locator(".app-sidebar").isVisible() && await page.locator(".main").getAttribute("inert") === null,
     "resize to desktop clears mobile overlay and inert state");
+  check(await page.evaluate(() => document.body.style.overflow !== "hidden"), "resize restores body scrolling");
   await navigate(page, "Overview");
 };
