@@ -319,7 +319,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("GET", "/api/categories?archived=true", branchAdmin, nil), 200)
 		expect(t, call("POST", fmt.Sprintf("/api/categories/%d/restore", localCategoryID), branchAdmin, nil), 200)
 		var branchAsset int64
-		if e := db.QueryRow(ctx, `INSERT INTO assets(org_id,tag,name,category_id,location_id,purchase_date,purchase_cost,salvage_value,useful_life_months) VALUES(1,'BRANCH-1','Branch laptop',1,2,'2026-01-01',9900000,0,48) RETURNING id`).Scan(&branchAsset); e != nil {
+		if e := db.QueryRow(ctx, `INSERT INTO assets(org_id,tag,name,category_id,location_id,purchase_date,purchase_cost,salvage_value,useful_life_months,depreciation_method,depreciation_start_date) VALUES(1,'BRANCH-1','Branch laptop',1,2,'2026-01-01',9900000,0,48,'straight_line','2026-01-01') RETURNING id`).Scan(&branchAsset); e != nil {
 			t.Fatal(e)
 		}
 		branchEdit := assetBody("BRANCH-1")
