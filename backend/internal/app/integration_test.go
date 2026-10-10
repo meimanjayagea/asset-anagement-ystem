@@ -401,7 +401,7 @@ func TestAPIIntegration(t *testing.T) {
 		if e := db.QueryRow(ctx, `SELECT purchase_cost FROM assets WHERE id=$1`, localAsset).Scan(&protectedCost); e != nil || protectedCost != 0 {
 			t.Fatalf("non-finance role changed protected cost: %d (%v)", protectedCost, e)
 		}
-		expect(t, call("POST", "/api/requests", scoped, map[string]any{"asset_id": localAsset, "kind": "transfer", "target_location_id": 2, "reason": "Cross branch", "version": 1}), 403)
+		expect(t, call("POST", "/api/requests", scoped, map[string]any{"asset_id": localAsset, "kind": "transfer", "target_location_id": 2, "reason": "Cross branch", "version": 2}), 403)
 		body = assetBody("LOCAL-DENIED")
 		body["location_id"] = 2
 		expect(t, call("POST", "/api/assets", scoped, body), 403)
