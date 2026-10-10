@@ -276,7 +276,11 @@ func TestAPIIntegration(t *testing.T) {
 	})
 
 	t.Run("branch-scopes-and-activity", func(t *testing.T) {
-		login := call("POST", "/api/login", "", map[string]any{"email": "branch-admin@test.local", "password": "test-password-123", "org_code": "ORG-000001", "branch_id": 2})
+		var branchAdminEmployeeID string
+		if e := db.QueryRow(ctx, `SELECT employee_id FROM users WHERE org_id=1 AND email='branch-admin@test.local'`).Scan(&branchAdminEmployeeID); e != nil {
+			t.Fatal(e)
+		}
+		login := call("POST", "/api/login", "", map[string]any{"employee_id": branchAdminEmployeeID, "password": "test-password-123", "org_code": "ORG-000001"})
 		expect(t, login, 200)
 		var loginBody struct {
 			ActiveBranch int64 `json:"active_branch_id"`
@@ -400,7 +404,7 @@ func TestAPIIntegration(t *testing.T) {
 		if strings.Contains(wrongOrg.Body.String(), "Email") {
 			t.Fatalf("login response leaked email-based identity: %s", wrongOrg.Body.String())
 		}
-		expect(t, call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_code": "ORG-000001"}), 422)
+		expect(t, call("POST", "/api/login", "", map[string]any{"email": "scoped@test.local", "password": "test-password-123", "org_code": "ORG-000001"}), 400)
 		expect(t, call("GET", "/api/assets?branch_id=2", scoped, nil), 403)
 		w := call("GET", "/api/assets", scoped, nil)
 		expect(t, w, 200)
