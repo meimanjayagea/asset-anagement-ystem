@@ -73,10 +73,13 @@ module.exports = async function responsive(page, check, directory) {
     }), "calendar title does not overlap month control");
     await page.getByRole("button", { name: "Notifikasi", exact: true }).click();
     await page.getByText("Tidak ada pengingat jatuh tempo.").waitFor();
-    check(await page.locator(".notification-menu").evaluate(e => {
+    const notificationBounds = await page.locator(".notification-menu").evaluate(e => {
       const r = e.getBoundingClientRect();
-      return r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1;
-    }), "notification panel fits viewport");
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    });
+    check(notificationBounds.left >= 0 && notificationBounds.right <= viewport.width + 1 &&
+      notificationBounds.top >= 0 && notificationBounds.bottom <= viewport.height + 1,
+      `notification panel fits ${viewport.width}x${viewport.height}: ${JSON.stringify(notificationBounds)}`);
     await page.getByRole("button", { name: "Tutup notifikasi", exact: true }).click();
     await page.screenshot({ path: `${directory}/responsive-${viewport.width}x${viewport.height}.png`, fullPage: true });
     if (drawer) {
