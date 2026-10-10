@@ -160,7 +160,11 @@ func run() error {
 	if !secure && parsed.Hostname() != "localhost" && parsed.Hostname() != "127.0.0.1" {
 		return fmt.Errorf("cookie insecure hanya untuk localhost")
 	}
-	srv := &http.Server{Addr: ":8080", Handler: (&app.Server{DB: db, Origin: origin, Secure: secure}).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		port = "8080"
+	}
+	srv := &http.Server{Addr: ":" + port, Handler: (&app.Server{DB: db, Origin: origin, Secure: secure}).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	done := make(chan error, 1)
 	go func() { slog.Info("listening", "address", srv.Addr); done <- srv.ListenAndServe() }()
 	sig := make(chan os.Signal, 1)
@@ -180,3 +184,4 @@ func main() {
 		os.Exit(1)
 	}
 }
+
