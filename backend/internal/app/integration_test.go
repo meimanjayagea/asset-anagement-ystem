@@ -342,7 +342,7 @@ func TestAPIIntegration(t *testing.T) {
 		if !strings.Contains(branchAssets.Body.String(), "BRANCH-1") || !strings.Contains(branchAssets.Body.String(), "9900000") {
 			t.Fatalf("branch administrator cannot see its branch or financial data: %s", branchAssets.Body.String())
 		}
-		financeAssets := call("GET", "/api/assets", finance, nil)
+		financeAssets := call("GET", "/api/assets?branch_id=2", finance, nil)
 		expect(t, financeAssets, 200)
 		if !strings.Contains(financeAssets.Body.String(), "9900000") {
 			t.Fatalf("finance role cannot see allowed financial data: %s", financeAssets.Body.String())
@@ -488,7 +488,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("GET", "/api/finance/depreciation?period="+period+"&branch_id=1", manager, nil), 403)
 		expect(t, call("GET", "/api/finance/depreciation?period="+period+"&branch_id=1", finance, nil), 200)
 
-		proposal := map[string]any{"asset_id": assetID, "revalued_amount": 8_500_000, "remaining_life_months": 24, "reason": "Independent valuation"}
+		proposal := map[string]any{"asset_id": assetID, "revalued_amount": 8_600_000, "remaining_life_months": 24, "reason": "Independent valuation"}
 		expect(t, call("POST", "/api/finance/valuations", finance, proposal), 201)
 		var valuationID int64
 		if e := db.QueryRow(ctx, `SELECT id FROM asset_valuations WHERE org_id=1 AND asset_id=$1 AND status='pending'`, assetID).Scan(&valuationID); e != nil {
