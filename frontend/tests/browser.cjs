@@ -1,5 +1,7 @@
 const { chromium } = require("playwright");
 const path = require("node:path");
+const { navigate } = require("./navigation.cjs");
+const responsive = require("./responsive.cjs");
 const base = path.resolve(
   process.env.SCREENSHOT_DIR || path.resolve(__dirname, "../../docs"),
 );
@@ -276,6 +278,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
           created_at: "2026-10-07T09:00:00Z",
         },
       ];
+    else if (["/api/notifications", "/api/loans", "/api/maintenance/planned", "/api/maintenance/assignees"].includes(path)) result = [];
     else if (path.endsWith("/maintenance"))
       result = [
         {
@@ -422,9 +425,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     (await page.getByText(/270,500,000/).count()) === 1,
     "value rendering",
   );
-  await page
-    .getByRole("button", { name: "Asset register", exact: true })
-    .click();
+  await navigate(page, "Asset register");
   await page
     .getByRole("button", { name: "Register asset", exact: true })
     .waitFor();
@@ -463,7 +464,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     lastPost.path === "/api/exports/assets" && lastPost.body.size === 25,
     "audited server export contract",
   );
-  await page.getByRole("button", { name: /Approvals/ }).click();
+  await navigate(page, /Approvals/);
   await page.getByRole("button", { name: "Approve", exact: true }).click();
   await page.getByLabel("Decision note").fill("Reviewed");
   await page.getByRole("button", { name: "Save & confirm" }).click();
@@ -471,10 +472,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     lastPost.path === "/api/requests/1/decision" && lastPost.body.approve,
     "approval contract",
   );
-  await page
-    .getByRole("button", { name: "Stocktake", exact: true })
-    .first()
-    .click();
+  await navigate(page, "Stocktake");
   await page.getByRole("button", { name: "Snapshot", exact: true }).click();
   check(
     (await page.getByText("Stocktake snapshot", { exact: true }).count()) === 1,
@@ -489,9 +487,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       lastPost.path === "/api/stocktakes/1/observe",
     "stocktake contract",
   );
-  await page
-    .getByRole("button", { name: "Team & access", exact: true })
-    .click();
+  await navigate(page, "Team & access");
   await page.getByRole("button", { name: "Edit access", exact: true }).click();
   await page.getByRole("dialog").locator("select").selectOption("auditor");
   await page.getByLabel("Active account").uncheck();
@@ -505,7 +501,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       lastPost.body.branch_ids.includes(2),
     "existing user branch assignment preserved",
   );
-  await page.getByRole("button", { name: "Branches", exact: true }).click();
+  await navigate(page, "Branches");
   await page.getByRole("button", { name: "Branch", exact: true }).click();
   await page.getByLabel("Code", { exact: true }).fill("SBY");
   await page.getByLabel("Name", { exact: true }).fill("Surabaya");
@@ -514,7 +510,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     lastPost.path === "/api/branches" && lastPost.body.code === "SBY",
     "branch creation contract",
   );
-  await page.getByRole("button", { name: "Categories", exact: true }).click();
+  await navigate(page, "Categories");
   await page
     .getByRole("button", { name: "Edit policy", exact: true })
     .first()
@@ -527,9 +523,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       lastPost.body.version === 1,
     "category policy contract",
   );
-  await page
-    .getByRole("button", { name: "User activity", exact: true })
-    .click();
+  await navigate(page, "User activity");
   await page
     .locator("table")
     .getByText("login_success", { exact: true })
@@ -545,11 +539,9 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   const heldResponse = new Promise((resolve) => {
     onResponseHeld = resolve;
   });
-  await page.getByRole("button", { name: "Categories", exact: true }).click();
+  await navigate(page, "Categories");
   await heldResponse;
-  await page
-    .getByRole("button", { name: "User activity", exact: true })
-    .click();
+  await navigate(page, "User activity");
   await page
     .locator("table")
     .getByText("login_success", { exact: true })
@@ -568,7 +560,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
       (await page.getByText("IT Equipment", { exact: true }).count()) === 0,
     "stale response cannot overwrite navigation",
   );
-  await page.getByRole("button", { name: "Finance & reports", exact: true }).click();
+  await navigate(page, "Finance & reports");
   await page.getByRole("tab", { name: "Revaluations" }).click();
   await page.getByText("Independent appraisal", { exact: true }).waitFor();
   check(
@@ -589,9 +581,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   await page.locator(".loading").waitFor({ state: "hidden" });
   await page.locator(".toast").waitFor({ state: "hidden" });
   await page.screenshot({ path: base + "/activity-demo.png", fullPage: true });
-  await page
-    .getByRole("button", { name: "Asset register", exact: true })
-    .click();
+  await navigate(page, "Asset register");
   await page.getByLabel("Branch filter").selectOption("1");
   await page.locator(".loading").waitFor({ state: "hidden" });
   check(
@@ -601,8 +591,9 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     "branch-filter rendering",
   );
   await page.getByLabel("Branch filter").selectOption("0");
+  await responsive(page, check, base);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Overview", exact: true }).click();
+  await navigate(page, "Overview");
   await page.locator(".loading").waitFor({ state: "hidden" });
   await page.screenshot({ path: base + "/mobile-demo.png", fullPage: true });
   check(
@@ -614,9 +605,11 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   role = "auditor";
   await page.reload();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
-  await page
-    .getByRole("button", { name: "Asset register", exact: true })
-    .click();
+  await navigate(page, "Asset register");
+  await page.getByRole("button", { name: "Open menu", exact: true }).click();
+  check(await page.locator(".nav-group-toggle").filter({ hasText: "Control & access" }).count() === 0, "empty permission group hidden");
+  check(await page.locator('.app-navigation .nav-item').filter({ hasText: "Team & access" }).count() === 0, "unauthorized navigation item not rendered");
+  await page.getByRole("button", { name: "Close menu", exact: true }).click();
   check(
     (await page
       .getByRole("button", { name: "Register asset", exact: true })
@@ -636,7 +629,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   role = "branch_admin";
   await page.reload();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
-  await page.getByRole("button", { name: "Categories", exact: true }).click();
+  await navigate(page, "Categories");
   await page.getByText("Vehicles", { exact: true }).waitFor();
   check(
     (await page.getByRole("button", { name: "Category", exact: true }).count()) === 1,
@@ -653,7 +646,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     lastPost.path === "/api/categories" && lastPost.body.branch_id === 1,
     "branch category creation carries local scope",
   );
-  await page.getByRole("button", { name: "Asset register", exact: true }).click();
+  await navigate(page, "Asset register");
   await page.getByText("Lenovo ThinkPad T14", { exact: true }).waitFor();
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
   await page.getByLabel("Name", { exact: true }).fill("Branch-updated laptop");

@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const QRCode = require("qrcode");
 const ExcelJS = require("exceljs");
+const { navigate } = require("./navigation.cjs");
 
 module.exports = async function lifecycle(page, context, baseURL, tag) {
   const request = async (endpoint, body) => {
@@ -64,9 +65,7 @@ module.exports = async function lifecycle(page, context, baseURL, tag) {
     headers: { "X-Requested-With": "AssetFlow", Origin: baseURL },
   });
   assert(login.ok());
-  await page
-    .getByRole("button", { name: "Asset lifecycle", exact: true })
-    .click();
+  await navigate(page, "Asset lifecycle");
   await page
     .getByRole("button", { name: "Detail " + tag, exact: true })
     .click();

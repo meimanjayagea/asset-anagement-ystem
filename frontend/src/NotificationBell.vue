@@ -147,4 +147,12 @@ onUnmounted(() => clearInterval(timer));
 .read {
   opacity: 0.65;
 }
+@media (max-width: 760px) {
+  .notification-menu {
+    position: fixed;
+    inset: auto 16px 16px;
+    width: auto;
+    max-height: calc(100dvh - 144px);
+  }
+}
 </style>

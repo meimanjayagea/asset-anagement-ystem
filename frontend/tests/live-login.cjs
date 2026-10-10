@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const path = require("node:path");
 const { chromium } = require("playwright");
+const { navigate } = require("./navigation.cjs");
 
 (async () => {
   if (!process.env.TEST_LOGIN_PASSWORD)
@@ -111,9 +112,7 @@ const { chromium } = require("playwright");
     await page
       .getByRole("heading", { name: "Overview", exact: true })
       .waitFor();
-    await page
-      .getByRole("button", { name: "Asset register", exact: true })
-      .click();
+    await navigate(page, "Asset register");
     await page
       .getByRole("button", { name: "Register asset", exact: true })
       .click();
@@ -136,9 +135,7 @@ const { chromium } = require("playwright");
       .click();
     await page.getByText(tag, { exact: false }).waitFor();
     await page.reload();
-    await page
-      .getByRole("button", { name: "Asset register", exact: true })
-      .click();
+    await navigate(page, "Asset register");
     await page.getByText(tag, { exact: false }).waitFor();
     try {
       await require("./lifecycle.cjs")(

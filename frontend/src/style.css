@@ -247,12 +247,12 @@ aside .brand {
   color: #668a78;
   margin-bottom: 14px;
 }
-nav {
+.app-navigation {
   display: flex;
   flex-direction: column;
   gap: 5px;
 }
-nav button {
+.app-navigation button {
   justify-content: flex-start;
   border-radius: 7px;
   background: transparent;
@@ -261,10 +261,10 @@ nav button {
   gap: 12px;
   font-size: 13px;
 }
-nav button:hover {
+.app-navigation button:hover {
   background: #203e31;
 }
-nav button.active {
+.app-navigation button.active {
   background: #d6e7a7;
   color: #284627;
   font-weight: 650;
@@ -297,7 +297,7 @@ nav button.active {
 .main {
   margin-left: 244px;
 }
-header {
+.app-header {
   height: 80px;
   background: #fff;
   border-bottom: 1px solid #e6ece8;
@@ -747,7 +747,7 @@ details summary {
   main {
     padding: 28px 24px;
   }
-  header {
+  .app-header {
     padding: 0 24px;
   }
   .kpis {
@@ -781,23 +781,23 @@ details summary {
     font-size: 19px;
     margin-bottom: 15px;
   }
-  nav {
+  .app-navigation {
     flex-direction: row;
     overflow: auto;
     gap: 4px;
   }
-  nav button {
+  .app-navigation button {
     white-space: nowrap;
     padding: 10px;
     font-size: 11px;
   }
-  nav button svg {
+  .app-navigation button svg {
     display: none;
   }
   .main {
     margin: 0;
   }
-  header {
+  .app-header {
     height: 65px;
     padding: 0 20px;
   }
@@ -929,8 +929,8 @@ html { font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, -apple-system, 
 body { line-height: 1.5; }
 body { background: var(--canvas); color: var(--ink); }
 .main { background: var(--canvas); }
-header, .login-form, .panel, .kpi, .modal { background: var(--surface); color: var(--ink); }
-header { border-color: var(--line); }
+.app-header, .login-form, .panel, .kpi, .modal { background: var(--surface); color: var(--ink); }
+.app-header { border-color: var(--line); }
 .login-wrap { position: relative; background: var(--canvas); }
 .login-story, aside { background: var(--nav); }
 .login-story h1 { color: #eff8fc; }
@@ -1033,5 +1033,68 @@ html[data-theme="dark"] .login-box { color: var(--ink); }
   .finance-actions { justify-content: flex-start; }
   .finance-summary { align-items: flex-start; flex-direction: column; }
   .account-grid, .compliance-grid { grid-template-columns: 1fr; }
-  header .appearance-tools label { padding: 1px 4px; }
+  .app-header .appearance-tools label { padding: 1px 4px; }
+}
+
+/* Keep application chrome separate from headers inside dialogs and workspaces. */
+.main, main, .page-heading > div, .search, .panel, .kpi, .overview-grid > * { min-width: 0; }
+.app-header { gap: 16px; min-height: 80px; height: auto; padding-block: 12px; }
+.header-leading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.breadcrumb { overflow-wrap: anywhere; }
+.navigation-toggle { display: none; }
+.user { min-width: 0; }
+.user-identity { min-width: 0; max-width: 180px; }
+.user-identity b, .user-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user > .icon, .appearance-tools, .avatar { flex-shrink: 0; }
+.user > .icon, .appearance-tools > .icon { min-width: 40px; min-height: 40px; }
+.kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.kpi strong, .value-panel h2 { overflow-wrap: anywhere; }
+.overview-grid { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+.table-scroll { max-width: 100%; overscroll-behavior-x: contain; }
+.buttons { min-width: 0; flex-shrink: 1; }
+.buttons > button { white-space: normal; }
+.page-heading h1, .modal-heading h2 { overflow-wrap: anywhere; }
+.modal-heading { gap: 12px; }
+.modal-heading > button { flex-shrink: 0; }
+.modal, .finance-form { max-height: calc(100dvh - 40px); }
+.toast { max-width: calc(100vw - 32px); overflow-wrap: anywhere; }
+.skip-link { position: fixed; top: 8px; left: 8px; transform: translateY(-160%); padding: 10px 16px; background: var(--surface); color: var(--ink); z-index: 100; }
+.skip-link:focus { transform: none; }
+@media (min-width: 961px) and (max-width: 1150px) {
+  .main { margin-left: 244px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-header { padding-inline: 20px; }
+  .app-header .breadcrumb { max-width: 180px; }
+}
+@media (max-width: 960px) {
+  .main { margin-left: 0; }
+  .navigation-toggle { display: inline-flex; width: 44px; height: 44px; flex-shrink: 0; }
+  .app-header { position: sticky; top: 0; z-index: 20; padding: 10px 16px; }
+  .app-header .breadcrumb { max-width: none; white-space: normal; font-size: 12px; }
+}
+@media (max-width: 760px) {
+  .app-header { flex-wrap: wrap; gap: 6px; }
+  .header-leading { width: 100%; }
+  .user { width: 100%; gap: 8px; }
+  .user-identity { flex: 1; max-width: none; }
+  .user .appearance-tools { gap: 2px; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi { padding: 16px; }
+  .kpi strong { font-size: 28px; }
+  .overview-grid { grid-template-columns: minmax(0, 1fr); }
+  .panel-heading, .pagination { gap: 12px; flex-wrap: wrap; padding: 16px; }
+  .buttons { gap: 8px; }
+  .buttons > .primary, .buttons > .secondary { flex: 1 1 auto; }
+  .filters .search { flex-basis: 100%; }
+  .filters select { width: auto; min-width: 120px; }
+  .finance-tabs, .life-tabs { min-width: 0; max-width: 100%; }
+  .toast { bottom: 16px; right: 16px; padding: 12px 16px; }
+}
+@media (max-width: 480px) {
+  .user .avatar { display: none; }
+  .kpi > span { gap: 8px; align-items: flex-start; }
+  .kpi > span svg { flex-shrink: 0; }
+  .empty { padding: 24px 16px; }
+  .login-preferences { top: 10px; right: 12px; }
+  .login-story .brand { margin-top: 36px; font-size: 20px; flex-wrap: wrap; }
 }

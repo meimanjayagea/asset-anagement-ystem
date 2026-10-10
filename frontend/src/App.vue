@@ -38,7 +38,9 @@ import {
   Archive,
   ArchiveRestore,
   Pencil,
+  Menu,
 } from "lucide-vue-next";
+import AppNavigation from "./AppNavigation.vue";
 import FinanceWorkspace from "./FinanceWorkspace.vue";
 import LifecycleWorkspace from "./LifecycleWorkspace.vue";
 import PhotoUploader from "./PhotoUploader.vue";
@@ -108,6 +110,7 @@ function copy(id: string, en: string) {
 }
 const canWrite = computed(() => can("assets.write"));
 const uploadingPhoto=ref(false);
+const navigationOpen = ref(false);
 const nav = computed(() =>
   [
     { key: "dashboard", label: t("nav.dashboard"), icon: LayoutDashboard, cap: "dashboard.read" },
@@ -323,6 +326,7 @@ async function logout() {
     ++loadGeneration;
     loading.value = false;
     me.value = null;
+    navigationOpen.value = false;
     branch.value = 0;
     showArchived.value = false;
     roleOptions.value = [];
@@ -336,10 +340,13 @@ function expired() {
   ++loadGeneration;
   loading.value = false;
   me.value = null;
+  navigationOpen.value = false;
   modal.value = "";
   error.value = "Sesi berakhir. Silakan login kembali.";
 }
 async function navigate(key: string) {
+  if (!nav.value.some(item => item.key === key)) return;
+  navigationOpen.value = false;
   page.value = key;
   current.value = 1;
   showArchived.value = false;
@@ -835,48 +842,26 @@ onUnmounted(() => {
     </section>
   </div>
   <div v-else class="workspace" :inert="!!modal">
-    <aside>
-      <div class="brand"><PackageCheck :size="27" /> AssetFlow</div>
-      <div class="org">
-        <span class="org-icon">AF</span>
-        <div>
-          <b>{{ me.organization_name }}</b
-          ><small>{{ me.all_branches ? copy("Pusat · semua cabang", "Head office · all branches") : copy("Ruang kerja cabang", "Branch workspace") }}</small>
+    <AppNavigation :items="nav" :active="page" :organization="me.organization_name"
+      :all-branches="me.all_branches" :pending="stats.pending_requests || 0" :mobile-open="navigationOpen"
+      @navigate="navigate" @close="navigationOpen = false" />
+    <div class="main" :inert="navigationOpen">
+      <a class="skip-link" href="#main-content">{{ copy('Langsung ke konten', 'Skip to content') }}</a>
+      <header class="app-header">
+        <div class="header-leading">
+          <button class="icon navigation-toggle" :aria-label="copy('Buka menu', 'Open menu')"
+            :title="copy('Buka menu', 'Open menu')" :aria-expanded="navigationOpen" aria-controls="app-navigation"
+            @click="navigationOpen = true"><Menu :size="22" /></button>
+          <div class="breadcrumb" :title="title">{{ copy("Ruang kerja", "Workspace") }} <span>/</span> {{ title }}</div>
         </div>
-      </div>
-      <span class="nav-label">{{ copy("RUANG KERJA", "WORKSPACE") }}</span>
-      <nav>
-        <button
-          v-for="n in nav"
-          :key="n.key"
-          @click="navigate(n.key)"
-          :class="{ active: page === n.key }"
-        >
-          <component :is="n.icon" :size="18" />{{ n.label
-          }}<span
-            v-if="n.key === 'requests' && stats.pending_requests"
-            class="nav-count"
-            >{{ stats.pending_requests }}</span
-          >
-        </button>
-      </nav>
-      <div class="aside-bottom">
-        <span class="live-dot"></span> {{ copy("Workspace terhubung", "Connected workspace") }}<small
-          >{{ copy("Tata kelola di setiap perubahan.", "Governance built into every move.") }}</small
-        >
-      </div>
-    </aside>
-    <div class="main">
-      <header>
-        <div class="breadcrumb">{{ copy("Ruang kerja", "Workspace") }} <span>/</span> {{ title }}</div>
         <div class="user">
           <div class="appearance-tools">
             <label :aria-label="t('common.language')"><Languages :size="16" /><select v-model="locale"><option value="id">ID</option><option value="en">EN</option></select></label>
             <button class="icon" @click="toggleTheme" :aria-label="t('common.theme')"><Sun v-if="theme === 'dark'" :size="17" /><Moon v-else :size="17" /></button>
           </div>
           <span class="avatar">{{ me.name.slice(0, 1) }}</span>
-          <div>
-            <b>{{ me.name }}</b
+          <div class="user-identity">
+            <b :title="me.name">{{ me.name }}</b
             ><small>{{ roleLabel(me.role) }}</small>
           </div>
           <button
@@ -890,7 +875,7 @@ onUnmounted(() => {
           </button>
         </div>
       </header>
-      <main>
+      <main id="main-content" tabindex="-1">
         <div class="page-heading">
           <div>
               <span class="eyebrow">{{ locale === "id" ? "OPERASIONAL ASET" : "ASSET OPERATIONS" }}</span>

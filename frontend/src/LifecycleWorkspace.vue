@@ -1576,12 +1576,15 @@ onUnmounted(() => {
 }
 .life-tabs {
   display: flex;
+  flex-direction: row;
+  min-width: 0;
   gap: 4px;
   border-bottom: 1px solid var(--line);
   overflow-x: auto;
   margin-bottom: 16px;
 }
 .life-tabs button {
+  flex-shrink: 0;
   white-space: nowrap;
   padding: 12px 16px;
   border: 0;
@@ -1662,6 +1665,7 @@ onUnmounted(() => {
 .visual-info h2 {
   font-size: 17px;
   margin: 10px 0 4px;
+  overflow-wrap: anywhere;
 }
 .visual-info h2 button {
   background: none;
@@ -1679,6 +1683,7 @@ onUnmounted(() => {
 .visual-info strong {
   display: block;
   margin-top: 10px;
+  overflow-wrap: anywhere;
 }
 .life-pagination {
   justify-content: flex-end;
@@ -1739,7 +1744,7 @@ onUnmounted(() => {
   background: var(--surface);
   border-radius: 6px;
   padding: 24px;
-  max-height: 90vh;
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   min-width: 0;
   border: 1px solid var(--line);
@@ -1891,7 +1896,7 @@ onUnmounted(() => {
   .asset-detail,
   .life-form {
     padding: 16px;
-    max-height: 94vh;
+    max-height: calc(100dvh - 20px);
   }
   .asset-detail-columns {
     grid-template-columns: 1fr;
@@ -1909,10 +1914,17 @@ onUnmounted(() => {
   }
   .calendar-heading h2 {
     width: 100%;
-    flex: auto;
+    flex: 1 0 100%;
   }
   .asset-spec dl {
     font-size: 13px;
   }
+}
+@media (max-width: 480px) {
+  .part-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .part-row input:first-child { grid-column: 1 / -1; }
+  .asset-detail header, .life-form header, .service-detail header, .audit-items header { align-items: flex-start; flex-wrap: wrap; }
+  .life-reports .period-field { flex-wrap: wrap; }
+  .scan-dialog { padding: 16px; max-height: calc(100dvh - 20px); }
 }
 </style>
