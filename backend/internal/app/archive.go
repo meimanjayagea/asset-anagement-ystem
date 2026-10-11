@@ -75,6 +75,9 @@ func (s *Server) archiveUser(w http.ResponseWriter, r *http.Request) error {
 		return fail(403, "Akun yang sedang digunakan tidak dapat diarsipkan")
 	}
 	e = s.transaction(r, func(tx pgx.Tx) error {
+		if _, e := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock($1)`, u.OrgID); e != nil {
+			return e
+		}
 		var role string
 		var active, all bool
 		var branches []int64

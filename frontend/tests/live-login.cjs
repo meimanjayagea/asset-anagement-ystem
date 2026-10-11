@@ -160,6 +160,7 @@ const { navigate } = require("./navigation.cjs");
       );
       throw error;
     }
+    await require("./general-setup-live.cjs")(page,context);
     await page.getByRole("button", { name: "Logout", exact: true }).click();
     await page.getByLabel("Password", { exact: true }).waitFor();
     const session = await context.request.get("http://127.0.0.1:18089/api/me");

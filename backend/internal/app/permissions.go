@@ -19,6 +19,7 @@ var roleLabels = map[string]string{
 }
 
 var allCapabilities = []string{
+	"general_setup.read", "general_setup.manage", "demo.manage",
 	"dashboard.read", "assets.read", "assets.write", "assets.operate", "assets.archive",
 	"assets.finance", "assets.export", "requests.read", "requests.create", "requests.decide",
 	"maintenance.read", "maintenance.manage", "stocktakes.read", "stocktakes.manage",

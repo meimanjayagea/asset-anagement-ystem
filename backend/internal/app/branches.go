@@ -49,24 +49,39 @@ func branchScope(r *http.Request, tx pgx.Tx, branch int64) error {
 func (s *Server) listBranches(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "branches.manage")
-	return s.rows(w, r, `SELECT id,code,name,address,deleted_at FROM branches WHERE org_id=$1 AND (($3::boolean AND deleted_at IS NOT NULL) OR (NOT $3::boolean AND deleted_at IS NULL)) AND (can_access_branch(org_id,$2,id) OR ($3::boolean AND $4::boolean)) ORDER BY code LIMIT 1000`, u.OrgID, u.ID, archived, u.AllBranches)
+	return s.rows(w, r, `SELECT id,code,business_code,name,address,version,deleted_at FROM branches WHERE org_id=$1 AND (($3::boolean AND deleted_at IS NOT NULL) OR (NOT $3::boolean AND deleted_at IS NULL)) AND (can_access_branch(org_id,$2,id) OR ($3::boolean AND $4::boolean)) ORDER BY code LIMIT 1000`, u.OrgID, u.ID, archived, u.AllBranches)
 }
 func (s *Server) createBranch(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
-		Code    string `json:"code"`
-		Name    string `json:"name"`
-		Address string `json:"address"`
+		Code     string `json:"code"`
+		Name     string `json:"name"`
+		Address  string `json:"address"`
+		DetailID int64  `json:"general_code_detail_id"`
 	}
 	if e := decode(w, r, &in); e != nil {
 		return e
 	}
 	in.Code = strings.ToUpper(strings.TrimSpace(in.Code))
 	in.Name = strings.TrimSpace(in.Name)
-	if len(in.Code) < 1 || len(in.Code) > 30 || len(in.Name) < 2 || len(in.Name) > 150 || len(in.Address) > 1000 {
+	if (in.Code == "" && in.DetailID <= 0) || (in.Code != "" && in.DetailID > 0) || len(in.Code) > 30 || len(in.Name) < 2 || len(in.Name) > 150 || len(in.Address) > 1000 {
 		return fail(422, "Kode/nama/alamat cabang tidak valid")
 	}
 	var n int64
 	e := s.transaction(r, func(tx pgx.Tx) error {
+		if in.DetailID > 0 {
+			if e := tx.QueryRow(r.Context(), `SELECT nextval(pg_get_serial_sequence('branches','id'))`).Scan(&n); e != nil {
+				return e
+			}
+			code, e := allocateGeneralCode(r, tx, in.DetailID, n, "branch")
+			if e != nil {
+				return e
+			}
+			in.Code = code
+			if _, e = tx.Exec(r.Context(), `INSERT INTO branches(id,org_id,code,business_code,name,address) OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$3,$4,$5)`, n, actor(r).OrgID, in.Code, in.Name, in.Address); e != nil {
+				return e
+			}
+			return logAudit(r.Context(), tx, actor(r), "create", "branch", n, nil, in)
+		}
 		e := tx.QueryRow(r.Context(), `INSERT INTO branches(org_id,code,name,address) VALUES($1,$2,$3,$4) RETURNING id`, actor(r).OrgID, in.Code, in.Name, in.Address).Scan(&n)
 		if e != nil {
 			return e
@@ -82,7 +97,7 @@ func (s *Server) createBranch(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) listLocations(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "locations.archive")
-	return s.rows(w, r, `SELECT l.id,l.name,l.building,l.floor,l.room,l.branch_id,b.name AS branch_name,b.code AS branch_code,l.deleted_at FROM locations l JOIN branches b ON b.id=l.branch_id WHERE l.org_id=$1 AND (($4::boolean AND l.deleted_at IS NOT NULL) OR (NOT $4::boolean AND l.deleted_at IS NULL)) AND b.deleted_at IS NULL AND can_access_branch(l.org_id,$2,l.branch_id) AND ($3::bigint=0 OR l.branch_id=$3) ORDER BY b.code,l.name LIMIT 1000`, u.OrgID, u.ID, selectedBranch(r), archived)
+	return s.rows(w, r, `SELECT l.id,l.version,l.name,l.building,l.floor,l.room,l.branch_id,b.name AS branch_name,b.code AS branch_code,l.deleted_at FROM locations l JOIN branches b ON b.id=l.branch_id WHERE l.org_id=$1 AND (($4::boolean AND l.deleted_at IS NOT NULL) OR (NOT $4::boolean AND l.deleted_at IS NULL)) AND b.deleted_at IS NULL AND can_access_branch(l.org_id,$2,l.branch_id) AND ($3::bigint=0 OR l.branch_id=$3) ORDER BY b.code,l.name LIMIT 1000`, u.OrgID, u.ID, selectedBranch(r), archived)
 }
 func (s *Server) createLocation(w http.ResponseWriter, r *http.Request) error {
 	var in struct {
@@ -178,7 +193,7 @@ func (s *Server) listAssignableRoles(w http.ResponseWriter, r *http.Request) err
 func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) error {
 	u := actor(r)
 	archived := r.URL.Query().Get("archived") == "true" && hasCapability(u.Role, "users.archive")
-	return s.rows(w, r, `SELECT u.id,u.name,u.email,u.employee_id,u.role,u.active,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) AS branch_ids,u.deleted_at FROM users u WHERE u.org_id=$1 AND (($4::boolean AND u.deleted_at IS NOT NULL) OR (NOT $4::boolean AND u.deleted_at IS NULL)) AND ($2 OR EXISTS(SELECT 1 FROM user_branches target JOIN user_branches own ON own.org_id=target.org_id AND own.branch_id=target.branch_id WHERE target.org_id=u.org_id AND target.user_id=u.id AND own.user_id=$3)) ORDER BY u.id LIMIT 1000`, u.OrgID, u.AllBranches, u.ID, archived)
+	return s.rows(w, r, `SELECT u.id,u.version,u.name,u.email,u.employee_id,u.role,u.active,u.all_branches,ARRAY(SELECT ub.branch_id FROM user_branches ub JOIN branches b ON b.id=ub.branch_id WHERE ub.user_id=u.id AND b.deleted_at IS NULL AND (u.role='admin' OR b.code<>'HQ') ORDER BY ub.branch_id) AS branch_ids,u.deleted_at FROM users u WHERE u.org_id=$1 AND (($4::boolean AND u.deleted_at IS NOT NULL) OR (NOT $4::boolean AND u.deleted_at IS NULL)) AND ($2 OR EXISTS(SELECT 1 FROM user_branches target JOIN user_branches own ON own.org_id=target.org_id AND own.branch_id=target.branch_id WHERE target.org_id=u.org_id AND target.user_id=u.id AND own.user_id=$3)) ORDER BY u.id LIMIT 1000`, u.OrgID, u.AllBranches, u.ID, archived)
 }
 func assignBranches(r *http.Request, tx pgx.Tx, user int64, all bool, branches []int64) error {
 	if !all && len(branches) == 0 {

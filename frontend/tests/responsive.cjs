@@ -1,7 +1,7 @@
 const { navigate } = require("./navigation.cjs");
 
 module.exports = async function responsive(page, check, directory) {
-  const groups = ["Assets & inventory", "Operations", "Master data", "Control & access"];
+  const groups = ["Assets & inventory", "Operations", "Master data", "General Setup", "Control & access"];
   const noOverflow = async message => check(await page.evaluate(() =>
     document.documentElement.scrollWidth <= innerWidth), message);
   for (const viewport of [
@@ -29,7 +29,7 @@ module.exports = async function responsive(page, check, directory) {
       await page.keyboard.press("Tab");
       check(await close.evaluate(e => e === document.activeElement), "drawer traps forward tab");
     }
-    check(await page.locator(".nav-group-toggle").count() === 4, "four business navigation groups");
+    check(await page.locator(".nav-group-toggle").count() === 5, "five business navigation groups");
     for (const group of groups) {
       const toggle = page.getByRole("button", { name: group, exact: true });
       if (await toggle.getAttribute("aria-expanded") === "false") await toggle.click();

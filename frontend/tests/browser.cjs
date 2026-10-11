@@ -2,6 +2,7 @@ const { chromium } = require("playwright");
 const path = require("node:path");
 const { navigate } = require("./navigation.cjs");
 const responsive = require("./responsive.cjs");
+const setup = require("./general-setup.cjs");
 const base = path.resolve(
   process.env.SCREENSHOT_DIR || path.resolve(__dirname, "../../docs"),
 );
@@ -23,6 +24,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   page.on("pageerror", (e) => errors.push(e.message));
   let role = "admin";
   const adminCapabilities = [
+    "general_setup.read", "general_setup.manage", "demo.manage",
     "dashboard.read", "assets.read", "assets.write", "assets.operate",
     "assets.archive", "assets.finance", "assets.export", "requests.read",
     "requests.create", "requests.decide", "maintenance.read", "maintenance.manage",
@@ -34,9 +36,10 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     "valuation.propose", "valuation.decide", "reports.read", "reports.export",
   ];
   const branchAdminCapabilities = adminCapabilities.filter(
-    (capability) => capability !== "branches.manage" && capability !== "users.manage_admin",
+    (capability) => !capability.startsWith("general_setup.") && capability !== "demo.manage" && capability !== "branches.manage" && capability !== "users.manage_admin",
   );
   let lastPost = null;
+  const setupFixtures=setup.fixtures();
   let holdPath = "",
     onResponseHeld,
     releaseResponse;
@@ -119,6 +122,12 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   await page.route("**/api/**", async (route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;
+    const setupResponse=setupFixtures(req);
+    if(setupResponse!==undefined){
+      if(req.method()!=="GET")lastPost={path,body:JSON.parse(req.postData()||"{}"),method:req.method()};
+      await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify(setupResponse)});
+      return;
+    }
     let result = {};
     if (path === "/api/login/options")
       result = {
@@ -141,8 +150,8 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
         { id: "it_developer", label: "IT Developer" },
         { id: "auditor", label: "Auditor" },
       ];
-    else if (req.method() === "POST") {
-      lastPost = { path, body: JSON.parse(req.postData() || "{}") };
+    else if (req.method() === "POST" || req.method() === "PUT") {
+      lastPost = { path, body: JSON.parse(req.postData() || "{}"),method:req.method() };
       if (path === "/api/exports/assets") {
         await route.fulfill({
           status: 200,
@@ -390,7 +399,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(result),
+      body: JSON.stringify(Array.isArray(result)?result.map(r=>({...r,version:r.version||1})):result),
     });
   });
   let checks = 0;
@@ -591,6 +600,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
     "branch-filter rendering",
   );
   await page.getByLabel("Branch filter").selectOption("0");
+  await setup.exercise(page,check,()=>lastPost,base);
   await responsive(page, check, base);
   await page.setViewportSize({ width: 390, height: 844 });
   await navigate(page, "Overview");

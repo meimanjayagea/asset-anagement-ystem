@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch, type Component } from "vue";
-import { Boxes, ChevronDown, Database, PackageCheck, ShieldCheck, Wrench, X } from "lucide-vue-next";
+import { Boxes, ChevronDown, Database, PackageCheck, ShieldCheck, Wrench, X, Settings } from "lucide-vue-next";
 import { locale } from "./preferences";
 
 type NavItem = { key: string; label: string; icon: Component };
@@ -21,6 +21,7 @@ const groups = computed(() => [
   { key: "inventory", label: copy("Aset & inventaris", "Assets & inventory"), icon: Boxes, keys: ["assets", "lifecycle"] },
   { key: "operations", label: copy("Operasional", "Operations"), icon: Wrench, keys: ["requests", "maintenance", "stocktakes"] },
   { key: "master", label: copy("Data master", "Master data"), icon: Database, keys: ["branches", "locations", "categories"] },
+  { key: "setup", label: "General Setup", icon: Settings, keys: ["general-codes", "general-code-details"] },
   { key: "control", label: copy("Kontrol & akses", "Control & access"), icon: ShieldCheck, keys: ["audit", "activity", "users"] },
 ].map(group => ({ ...group, items: props.items.filter(item => group.keys.includes(item.key)) }))
   .filter(group => group.items.length));

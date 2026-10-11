@@ -91,7 +91,7 @@ func TestAPIIntegration(t *testing.T) {
 	if _, e = db.Exec(ctx, string(migration)); e != nil {
 		t.Fatal(e)
 	}
-	for _, file := range []string{"007_field_lifecycle.sql", "008_record_metadata.sql"} {
+	for _, file := range []string{"007_field_lifecycle.sql", "008_record_metadata.sql", "009_general_setup.sql"} {
 		migration, e = os.ReadFile("../../migrations/" + file)
 		if e != nil {
 			t.Fatal(e)
@@ -741,6 +741,7 @@ func TestAPIIntegration(t *testing.T) {
 		expect(t, call("POST", fmt.Sprintf("/api/assets/%d/action", created.ID), admin, map[string]any{"action": "assign", "custodian": "Forbidden", "version": 3}), 409)
 	})
 	t.Run("field-lifecycle", func(t *testing.T) { exerciseLifecycle(t, call, admin, operator, auditor, other) })
+	t.Run("general-setup-master-edit-demo", func(t *testing.T) { exerciseGeneralSetup(t, call, admin, branchAdmin, other) })
 	t.Run("record-metadata-all-tables", func(t *testing.T) {
 		var missing int
 		if err := db.QueryRow(ctx, `SELECT count(*) FROM information_schema.tables t WHERE t.table_schema=current_schema() AND t.table_type='BASE TABLE' AND EXISTS(SELECT 1 FROM unnest(ARRAY['created_at','created_by','updated_at','updated_by']) required(name) WHERE NOT EXISTS(SELECT 1 FROM information_schema.columns c WHERE c.table_schema=t.table_schema AND c.table_name=t.table_name AND c.column_name=required.name))`).Scan(&missing); err != nil || missing != 0 {

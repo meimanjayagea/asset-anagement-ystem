@@ -45,6 +45,7 @@ import FinanceWorkspace from "./FinanceWorkspace.vue";
 import LifecycleWorkspace from "./LifecycleWorkspace.vue";
 import PhotoUploader from "./PhotoUploader.vue";
 import NotificationBell from "./NotificationBell.vue";
+import GeneralSetupWorkspace from "./GeneralSetupWorkspace.vue";
 import {
   api,
   ApiError,
@@ -83,6 +84,8 @@ const branches = ref<any[]>([]),
   showArchived = ref(false),
   activityEvent = ref(""),
   historyRecords = ref<any[]>([]);
+const codeDetails = ref<any[]>([]);
+const setupDialogOpen = ref(false);
 const assetLocations = computed(() =>
   locations.value.filter((l) => l.branch_id === form.value.asset_branch_id),
 );
@@ -125,6 +128,8 @@ const nav = computed(() =>
     { key: "audit", label: t("nav.audit"), icon: ShieldCheck, cap: "audit.read" },
     { key: "activity", label: t("nav.activity"), icon: History, cap: "activity.read" },
     { key: "users", label: t("nav.users"), icon: Users, cap: "users.read" },
+    { key: "general-codes", label: "General Code", icon: Layers, cap: "general_setup.read" },
+    { key: "general-code-details", label: "General Code Detail", icon: Layers, cap: "general_setup.read" },
     { key: "finance", label: t("nav.finance"), icon: Landmark, cap: can("finance.read") ? "finance.read" : "reports.read", show: can("finance.read") || can("reports.read") },
   ].filter((item: any) => item.show !== false && can(item.cap)),
 );
@@ -159,6 +164,10 @@ const modalTitle = computed(
     (
       ({
         branch: copy("Tambah cabang", "Add branch"),
+        editBranch: copy("Edit cabang", "Edit branch"),
+        editLocation: copy("Edit lokasi", "Edit location"),
+        editCategory: copy("Edit kategori", "Edit category"),
+        editUser: copy("Edit pengguna", "Edit user"),
         policy: copy("Kebijakan kategori", "Category policy"),
         asset: t("asset.register"),
         editAsset: t("asset.edit"),
@@ -235,7 +244,7 @@ async function load() {
   stats.value = {};
   total.value = 0;
   try {
-    if (view === "finance" || view === "lifecycle") {
+    if (view === "finance" || view === "lifecycle" || view.startsWith("general-code")) {
       return;
     } else if (view === "dashboard") {
       const [summary, data] = await Promise.all([
@@ -366,7 +375,7 @@ async function changeBranch() {
   try { await masters(); await load(); }
   catch(e) {error.value=(e as Error).message;loading.value=false;}
 }
-function open(kind: string, a: Asset | null = null) {
+async function open(kind: string, a: Asset | null = null) {
   error.value = "";
   selected.value = a;
   modal.value = kind;
@@ -426,7 +435,10 @@ function open(kind: string, a: Asset | null = null) {
       title: "",
       due_date: a?.next_maintenance_date || today,
     };
-  if (kind === "branch") form.value = { code: "", name: "", address: "" };
+  if (kind === "branch") form.value = { code: "", name: "", address: "", general_code_detail_id: 0 };
+  if (kind === "branch" && can("general_setup.read")) {
+    try { codeDetails.value = await api("/general-code-details"); } catch (e) { error.value = (e as Error).message; }
+  }
   if (kind === "location")
     form.value = { name: "", branch_id: branch.value || branches.value[0]?.id, building: '', floor: '', room: '' };
   if (kind === "category")
@@ -470,6 +482,19 @@ async function submit() {
     let endpoint = "";
     let body = { ...form.value };
     switch (modal.value) {
+      case "editBranch":
+      case "editLocation":
+      case "editCategory":
+      case "editUser": {
+        const resource = ({editBranch:"branches",editLocation:"locations",editCategory:"categories",editUser:"users"} as Record<string,string>)[modal.value];
+        const payload: Record<string,any> = {name:body.name,version:body.version};
+        if(resource==="branches"){payload.address=body.address;payload.general_code_detail_id=body.general_code_detail_id || 0;}
+        if(resource==="locations"){payload.building=body.building;payload.floor=body.floor;payload.room=body.room;}
+        if(resource==="categories")payload.useful_life_months=body.useful_life_months;
+        if(resource==="users")payload.email=body.email;
+        await api(`/${resource}/${body.id}`,payload,"PUT");
+        modal.value=""; notify(copy("Data diperbarui","Data updated")); await masters(); await load(); return;
+      }
       case "branch":
         endpoint = "/branches";
         break;
@@ -689,6 +714,13 @@ async function archiveUser(r: any) {
     error.value = (e as Error).message;
   }
 }
+async function editMaster(kind:string,row:any) {
+  open(kind);
+  form.value={...row,general_code_detail_id:0};
+  if(kind==="editBranch" && can("general_setup.read")){
+    try {codeDetails.value=await api("/general-code-details");}catch(e){error.value=(e as Error).message;}
+  }
+}
 async function restoreUser(r: any) {
   try {
     await api(`/users/${r.id}/restore`, {});
@@ -841,7 +873,7 @@ onUnmounted(() => {
       </div>
     </section>
   </div>
-  <div v-else class="workspace" :inert="!!modal">
+  <div v-else class="workspace" :inert="!!modal || setupDialogOpen">
     <AppNavigation :items="nav" :active="page" :organization="me.organization_name"
       :all-branches="me.all_branches" :pending="stats.pending_requests || 0" :mobile-open="navigationOpen"
       @navigate="navigate" @close="navigationOpen = false" />
@@ -1199,6 +1231,7 @@ onUnmounted(() => {
         ></template>
         <FinanceWorkspace v-else-if="page === 'finance'" :branch-id="branch" :user-id="me.id" :finance="can('finance.read')" :can-manage="can('finance.manage')" :can-propose="can('valuation.propose')" :can-decide="can('valuation.decide')" :contracts-read="can('contracts.read')" :contracts-manage="can('contracts.manage')" :locale="locale" />
         <LifecycleWorkspace v-else-if="page === 'lifecycle'" :branch-id="branch" :user="me" />
+        <GeneralSetupWorkspace v-else-if="page.startsWith('general-code')" :key="page" :view="page" :can-manage="can('general_setup.manage')" @seeded="masters" @dialog="setupDialogOpen=$event" />
         <section v-else class="panel">
           <div v-if="page === 'activity'" class="filters">
             <select
@@ -1414,10 +1447,11 @@ onUnmounted(() => {
               </thead>
               <tbody>
                 <tr v-for="r in records" :key="r.id">
-                  <td>{{ r.code }}</td>
+                  <td>{{ r.business_code || r.code }}<small v-if="r.business_code">{{ r.code }}</small></td>
                   <td>{{ r.name }}</td>
                   <td>{{ r.address || "—" }}</td>
                   <td>
+                    <button v-if="!showArchived && can('branches.manage')" class="text-btn" @click="editMaster('editBranch',r)"><Pencil :size="14" /> {{ copy("Edit","Edit") }}</button>
                     <button
                       v-if="!showArchived && can('branches.manage') && r.code !== 'HQ'"
                       class="text-btn"
@@ -1504,6 +1538,7 @@ onUnmounted(() => {
                     }}
                   </td>
                   <td>
+                    <button v-if="!showArchived && can('users.manage') && (me.role==='admin' || !['admin','branch_admin'].includes(r.role))" class="text-btn" @click="editMaster('editUser',r)"><Pencil :size="14" /> {{ copy("Edit","Edit") }}</button>
                     <button
                       v-if="!showArchived && r.id !== me.id && can('users.manage')"
                       class="text-btn"
@@ -1566,7 +1601,7 @@ onUnmounted(() => {
                         : copy("Manual saja", "Manual only")
                     }}<small>{{ r.maintenance_instructions }}</small
                     ><button
-                      v-if="can('categories.manage') && (me?.role === 'admin' || r.branch_id === branch)"
+                      v-if="!showArchived && can('categories.manage') && (me?.role === 'admin' || r.branch_id === branch)"
                       class="text-btn"
                       @click="
                         open('policy');
@@ -1585,6 +1620,7 @@ onUnmounted(() => {
                     </button>
                   </td>
                   <td>
+                    <button v-if="!showArchived && ((page==='locations' && can('locations.manage')) || (page==='categories' && can('categories.manage') && (me.role==='admin'||r.branch_id===branch)))" class="text-btn" @click="editMaster(page==='locations'?'editLocation':'editCategory',r)"><Pencil :size="14" /> {{ copy("Edit","Edit") }}</button>
                     <button
                       v-if="!showArchived && page === 'locations' && can('locations.archive')"
                       class="text-btn"
@@ -1674,13 +1710,15 @@ onUnmounted(() => {
         </button>
       </div>
       <form @submit.prevent="submit">
-        <template v-if="modal === 'branch'"
+        <template v-if="['branch','editBranch'].includes(modal)"
+          ><label v-if="modal==='branch' || !form.business_code">{{ copy("Aturan kode","Code rule") }}<select v-model.number="form.general_code_detail_id" @change="modal==='branch' && (form.code='')"><option :value="0">{{ copy("Kode manual","Manual code") }}</option><option v-for="d in codeDetails.filter(d=>d.entity_type===(form.code==='HQ'?'hq':'branch'))" :key="d.id" :value="d.id">{{ d.name }} · {{ d.preview }}</option></select></label
+          ><template v-if="modal==='branch' && !form.general_code_detail_id"
           ><label
             >{{ copy("Kode", "Code") }}<input
               v-model="form.code"
               required
               maxlength="30"
-              placeholder="JKT-01" /></label
+              placeholder="JKT-01" /></label></template
           ><label
             >{{ copy("Nama", "Name") }}<input
               v-model="form.name"
@@ -1692,9 +1730,9 @@ onUnmounted(() => {
               v-model="form.address"
               maxlength="1000"
             ></textarea></label></template
-        ><template v-if="modal === 'location'"
+        ><template v-if="['location','editLocation'].includes(modal)"
           ><label>Gedung<input v-model="form.building" maxlength="100" /></label><label>Lantai<input v-model="form.floor" maxlength="40" /></label><label>Ruangan<input v-model="form.room" maxlength="100" /></label><label
-            >{{ t("common.branch") }}<select v-model.number="form.branch_id" required>
+            >{{ t("common.branch") }}<select v-model.number="form.branch_id" required :disabled="modal==='editLocation'">
               <option v-for="b in branches" :key="b.id" :value="b.id">
                 {{ b.code }} · {{ b.name }}
               </option>
@@ -2031,21 +2069,21 @@ onUnmounted(() => {
               v-model="form.due_date"
               type="date"
               required /></label></template
-        ><template v-if="['location', 'category', 'user'].includes(modal)"
+        ><template v-if="['location', 'category', 'user','editLocation','editCategory','editUser'].includes(modal)"
           ><label
             >{{ copy("Nama", "Name") }}<input
               v-model="form.name"
               required
               minlength="2"
               maxlength="100" /></label
-          ><label v-if="modal === 'category'"
+          ><label v-if="['category','editCategory'].includes(modal)"
             >{{ t("asset.life") }}<input
               v-model.number="form.useful_life_months"
               type="number"
               min="1"
               max="1200"
               required /></label></template
-        ><template v-if="modal === 'user'"
+        ><label v-if="modal==='editUser'">Email<input v-model="form.email" type="email" required maxlength="254" /></label><template v-if="modal === 'user'"
           ><label
             >Email<input
               v-model="form.email"

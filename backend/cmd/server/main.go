@@ -26,7 +26,7 @@ func run() error {
 	if len(os.Args) > 1 {
 		command = os.Args[1]
 	}
-	if command != "serve" && command != "migrate" && command != "bootstrap" && command != "reset-password" {
+	if command != "serve" && command != "migrate" && command != "bootstrap" && command != "reset-password" && command != "seed-demo" {
 		return fmt.Errorf("unknown command: %s", command)
 	}
 	if command == "migrate" || (command == "serve" && os.Getenv("AUTO_MIGRATE") == "true") {
@@ -70,6 +70,21 @@ func run() error {
 	server := &app.Server{DB: db}
 	if e = server.CheckReadiness(ctx); e != nil {
 		return e
+	}
+	if command == "seed-demo" || (command == "serve" && os.Getenv("DEMO_SEED_CONFIRM") == "SEED_DEMO_KEEP_EXISTING") {
+		if os.Getenv("DEMO_SEED_CONFIRM") != "SEED_DEMO_KEEP_EXISTING" || os.Getenv("DEMO_SEED_ORG_CODE") == "" {
+			return fmt.Errorf("DEMO_SEED_CONFIRM and DEMO_SEED_ORG_CODE required")
+		}
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 90*time.Second)
+		result, err := server.SeedDemo(seedCtx, os.Getenv("DEMO_SEED_ORG_CODE"))
+		seedCancel()
+		if err != nil {
+			return err
+		}
+		slog.Info("demo seed complete", "summary", result)
+		if command == "seed-demo" {
+			return nil
+		}
 	}
 	if command == "reset-password" || (command == "serve" && os.Getenv("ACCOUNT_RECOVERY") == "true") {
 		if e = resetAccountPassword(ctx, db, os.Getenv("RECOVERY_ORG_CODE"), os.Getenv("RECOVERY_EMAIL"), os.Getenv("RECOVERY_PASSWORD"), os.Getenv("RECOVERY_OPERATION_ID")); e != nil {

@@ -36,7 +36,7 @@ The transaction wrapper passes the authenticated actor to a transaction-local se
 1. Create a database backup/snapshot using the managed database provider before applying schema changes.
 2. Prefer a migration job using an owner connection in `MIGRATION_DATABASE_URL`. Run the server `migrate` command or `docs/login-upgrade.sql`. Migrations are transactional and advisory-locked.
 3. Apply `docs/least-privilege.sql` for a separate runtime role, including new table/sequence grants. Adjust its database name to the actual deployment.
-4. Deploy backend and confirm `/health/ready` succeeds with all eight migrations. Then deploy the matching frontend commit.
+4. Deploy backend and confirm `/health/ready` succeeds with all nine migrations. Then deploy the matching frontend commit.
 5. When the managed owner connection cannot leave the platform, an explicitly authorized temporary deployment can set `AUTO_MIGRATE=true` and `MIGRATION_USE_RUNTIME_DATABASE=true`. After successful readiness verification, set both false and redeploy. Do not enable `ACCOUNT_RECOVERY` or change production passwords for this release.
 6. Verify login options, authenticated scope, catalog/image loading, notifications and reports. Perform destructive business-flow UAT in a disposable database, not production inventory.
 7. The additive schema supports an application rollback to the previous code without dropping evidence or audit data. Do not run destructive down migrations. A failed migration rolls back as one transaction.

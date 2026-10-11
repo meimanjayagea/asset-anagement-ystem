@@ -8,13 +8,17 @@ import (
 // CheckReadiness validates the schema and permissions needed to complete login.
 func (s *Server) CheckReadiness(ctx context.Context) error {
 	var versions int
-	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version BETWEEN 1 AND 8`).Scan(&versions); err != nil {
+	if err := s.DB.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version BETWEEN 1 AND 9`).Scan(&versions); err != nil {
 		return fmt.Errorf("schema unavailable; run migrate: %w", err)
 	}
-	if versions != 8 {
-		return fmt.Errorf("schema incomplete (%d/8); run migrate", versions)
+	if versions != 9 {
+		return fmt.Errorf("schema incomplete (%d/9); run migrate", versions)
 	}
 	for _, query := range []string{
+		`SELECT id,company_prefix,version FROM general_codes LIMIT 0`,
+		`SELECT id,next_number FROM general_code_details LIMIT 0`,
+		`SELECT code,detail_id FROM issued_general_codes LIMIT 0`,
+		`SELECT org_id,seed_key,summary FROM demo_seed_runs LIMIT 0`,
 		`SELECT code FROM organizations LIMIT 0`,
 		`SELECT employee_id,password_hash,active,deleted_at FROM users LIMIT 0`,
 		`SELECT token_hash,user_id,expires_at,active_branch_id FROM sessions LIMIT 0`,
@@ -48,6 +52,15 @@ func (s *Server) CheckReadiness(ctx context.Context) error {
 		has_table_privilege(current_user,'asset_loans','UPDATE') AND
 		has_table_privilege(current_user,'notification_receipts','INSERT') AND
 		has_table_privilege(current_user,'notification_receipts','UPDATE') AND
+  has_table_privilege(current_user,'general_codes','INSERT') AND
+  has_table_privilege(current_user,'general_codes','UPDATE') AND
+  has_table_privilege(current_user,'general_code_details','INSERT') AND
+  has_table_privilege(current_user,'general_code_details','UPDATE') AND
+  has_table_privilege(current_user,'issued_general_codes','INSERT') AND
+  has_table_privilege(current_user,'demo_seed_runs','INSERT') AND
+  has_sequence_privilege(current_user,pg_get_serial_sequence('general_codes','id'),'USAGE') AND
+  has_sequence_privilege(current_user,pg_get_serial_sequence('general_code_details','id'),'USAGE') AND
+  has_sequence_privilege(current_user,pg_get_serial_sequence('issued_general_codes','id'),'USAGE') AND
 		has_sequence_privilege(current_user,pg_get_serial_sequence('asset_photos','id'),'USAGE') AND
 		has_sequence_privilege(current_user,pg_get_serial_sequence('asset_loans','id'),'USAGE') AND
 		has_sequence_privilege(current_user,pg_get_serial_sequence('audit_logs','id'),'USAGE') AND

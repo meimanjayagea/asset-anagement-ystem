@@ -108,7 +108,7 @@ func testMigrationUpgrade(t *testing.T, version int) {
 	if err := db.QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&versions); err != nil {
 		t.Fatal(err)
 	}
-	if versions != 8 {
-		t.Fatalf("expected eight migrations, got %d", versions)
+	if versions != 9 {
+		t.Fatalf("expected nine migrations, got %d", versions)
 	}
 }

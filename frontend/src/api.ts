@@ -58,7 +58,7 @@ export class ApiError extends Error {
 export async function api<T = any>(
   path: string,
   body?: unknown,
-  method?: "GET" | "POST" | "DELETE",
+  method?: "GET" | "POST" | "PUT" | "DELETE",
 ): Promise<T> {
   const response = await fetch("/api" + path, {
     method: method || (body === undefined ? "GET" : "POST"),

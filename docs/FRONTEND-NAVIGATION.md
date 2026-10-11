@@ -8,6 +8,7 @@
 | Assets & inventory | Asset register, Asset lifecycle | The register owns structured records; lifecycle owns photos, borrowing, repair evidence, and field operations. |
 | Operations | Approvals, Maintenance, Stocktake | Existing operational queues, approval decisions, and inspection sessions. Their routes and API contracts remain unchanged. |
 | Master data | Branches, Locations, Categories | Shared organizational structure and classification used by asset workflows. |
+| General Setup | General Code, General Code Detail | Company-scoped lookup and numbering configuration, separate from physical locations and user access. Central administrators only. |
 | Control & access | Audit trail, User activity, Team & access | Change accountability, session/request history, and authorization administration. Physical stocktake remains an operational inspection, not a security log. |
 | Finance & reports | Direct entry with existing internal tabs | Accounting, depreciation, revaluation, journals, contracts, and compliance already have their own workspace navigation. |
 
