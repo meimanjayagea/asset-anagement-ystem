@@ -46,6 +46,8 @@ import LifecycleWorkspace from "./LifecycleWorkspace.vue";
 import PhotoUploader from "./PhotoUploader.vue";
 import NotificationBell from "./NotificationBell.vue";
 import GeneralSetupWorkspace from "./GeneralSetupWorkspace.vue";
+import ConfirmationDialog from "./ConfirmationDialog.vue";
+import { confirmAction } from "./confirmation";
 import {
   api,
   ApiError,
@@ -686,7 +688,7 @@ async function exportCSV() {
   }
 }
 async function archiveAsset(a: Asset) {
-  if (!window.confirm(copy(`Arsipkan aset ${a.tag}? Data tetap tersimpan dan bisa dipulihkan.`, `Archive asset ${a.tag}? Its data will be retained and can be restored.`))) return;
+  if (!await confirmAction({title:copy("Arsipkan aset?","Archive asset?"),message:copy("Aset akan dikeluarkan dari daftar aktif. Data dan riwayatnya tetap tersimpan dan bisa dipulihkan.","The asset will leave the active list. Its data and history will be retained and can be restored."),subject:`${a.tag} · ${a.name}`,confirmLabel:copy("Arsipkan aset","Archive asset"),icon:"archive"})) return;
   try {
     await api(`/assets/${a.id}`, undefined, "DELETE");
     notify(copy("Aset diarsipkan", "Asset archived"));
@@ -705,7 +707,7 @@ async function restoreAsset(a: Asset) {
   }
 }
 async function archiveUser(r: any) {
-  if (!window.confirm(copy(`Arsipkan akun ${r.name}? Sesi aktifnya akan dicabut.`, `Archive ${r.name}'s account? Their active sessions will be revoked.`))) return;
+  if (!await confirmAction({title:copy("Arsipkan akun?","Archive account?"),message:copy("Pengguna tidak dapat masuk dan seluruh sesi aktifnya akan dicabut. Data akun tetap tersimpan untuk pemulihan.","The user will no longer be able to sign in and all active sessions will be revoked. Account data will be retained for restoration."),subject:r.name,confirmLabel:copy("Arsipkan akun","Archive account"),tone:"danger",icon:"archive"})) return;
   try {
     await api(`/users/${r.id}`, undefined, "DELETE");
     notify(copy("Akun diarsipkan", "Account archived"));
@@ -731,7 +733,7 @@ async function restoreUser(r: any) {
   }
 }
 async function archiveBranch(r: any) {
-  if (!window.confirm(copy(`Arsipkan cabang ${r.code}? Cabang pusat tidak bisa diarsipkan.`, `Archive branch ${r.code}? Head office cannot be archived.`))) return;
+  if (!await confirmAction({title:copy("Arsipkan cabang?","Archive branch?"),message:copy("Cabang akan dikeluarkan dari daftar aktif tanpa menghapus riwayatnya. Cabang pusat atau cabang yang masih digunakan tidak dapat diarsipkan.","The branch will leave the active list without deleting its history. Head office or a branch still in use cannot be archived."),subject:`${r.business_code || r.code} · ${r.name}`,confirmLabel:copy("Arsipkan cabang","Archive branch"),icon:"archive"})) return;
   try {
     await api(`/branches/${r.id}`, undefined, "DELETE");
     notify(copy("Cabang diarsipkan", "Branch archived"));
@@ -753,7 +755,7 @@ async function restoreBranch(r: any) {
 }
 async function archiveMaster(kind: "locations" | "categories", r: any) {
   const label = kind === "locations" ? copy("lokasi", "location") : copy("kategori", "category");
-  if (!window.confirm(copy(`Arsipkan ${label} ${r.name}? Data tetap tersimpan.`, `Archive ${label} ${r.name}? Its data will be retained.`))) return;
+  if (!await confirmAction({title:copy(`Arsipkan ${label}?`,`Archive ${label}?`),message:copy("Data akan dikeluarkan dari daftar aktif, tetap tersimpan, dan dapat dipulihkan. Data yang masih digunakan tidak dapat diarsipkan.","The record will leave the active list, remain stored, and can be restored. Records still in use cannot be archived."),subject:r.name,confirmLabel:copy("Arsipkan data","Archive record"),icon:"archive"})) return;
   try {
     await api(`/${kind}/${r.id}`, undefined, "DELETE");
     notify(copy(`${label} diarsipkan`, `${label[0].toUpperCase()}${label.slice(1)} archived`));
@@ -804,6 +806,7 @@ onUnmounted(() => {
 });
 </script>
 <template>
+  <ConfirmationDialog />
   <div v-if="initializing" class="boot">{{ copy("Memuat AssetFlow…", "Loading AssetFlow…") }}</div>
   <div v-else-if="!me" class="login-wrap">
     <div class="appearance-tools login-preferences">

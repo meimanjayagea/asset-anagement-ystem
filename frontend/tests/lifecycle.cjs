@@ -221,8 +221,8 @@ module.exports = async function lifecycle(page, context, baseURL, tag) {
     .locator(".audit-items td")
     .filter({ hasText: /^damaged$/ })
     .waitFor();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Tutup opname", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Tutup opname", exact: true }).click();
   await page
     .locator("tr")
     .filter({ hasText: "Field physical audit "+tag })

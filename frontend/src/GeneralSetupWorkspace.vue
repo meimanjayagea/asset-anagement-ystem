@@ -3,6 +3,7 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { Plus, Pencil, Archive, ArchiveRestore, RefreshCw, X, Database, Save } from "lucide-vue-next";
 import { api, timestamp } from "./api";
 import { locale } from "./preferences";
+import { confirmAction } from "./confirmation";
 const props = defineProps<{view:string;canManage:boolean}>();
 const emit = defineEmits<{seeded:[];dialog:[open:boolean]}>();
 const copy=(id:string,en:string)=>locale.value==="id"?id:en;
@@ -52,13 +53,13 @@ async function save(){
  }catch(e){error.value=(e as Error).message;}finally{saving.value=false;}
 }
 async function archive(row:any){
- if(!window.confirm(copy(`${archived.value?"Pulihkan":"Arsipkan"} ${row.name}?`,`${archived.value?"Restore":"Archive"} ${row.name}?`)))return;
+ if(!await confirmAction({title:archived.value?copy("Pulihkan aturan kode?","Restore code rule?"):copy("Arsipkan aturan kode?","Archive code rule?"),message:archived.value?copy("Aturan akan kembali ke daftar aktif. General Code induk harus aktif terlebih dahulu.","The rule will return to the active list. Its parent General Code must be active first."):copy("Aturan tidak dapat digunakan untuk menerbitkan kode baru. Kode yang sudah terbit tetap berlaku dan tidak digunakan ulang.","The rule cannot issue new codes. Previously issued codes remain valid and will never be reused."),subject:`${row.code} · ${row.name}`,confirmLabel:archived.value?copy("Pulihkan aturan","Restore rule"):copy("Arsipkan aturan","Archive rule"),tone:archived.value?"positive":"warning",icon:archived.value?"restore":"archive"}))return;
  saving.value=true;error.value="";
  try{await api(endpoint.value+"/"+row.id+(archived.value?"/restore":""),archived.value?{}:undefined,archived.value?"POST":"DELETE");await load();}
  catch(e){error.value=(e as Error).message;}finally{saving.value=false;}
 }
 async function seed(){
- if(!window.confirm(copy("Tambahkan sampel fiktif pada cabang DEMO tanpa menghapus data lama? Data DEMO akan masuk ke laporan perusahaan.","Add fictional samples in the DEMO branch without deleting existing data? DEMO will be included in company reports.")))return;
+ if(!await confirmAction({title:copy("Tambahkan data DEMO?","Add DEMO sample data?"),message:copy("Sampel fiktif akan ditambahkan tanpa menghapus data lama. Data DEMO ikut dalam laporan perusahaan; pilih cabang operasional untuk mengecualikannya. Sampel yang sudah tersedia tidak digandakan.","Fictional samples will be added without deleting existing records. DEMO is included in company reports; select an operational branch to exclude it. Existing samples will not be duplicated."),subject:copy("Cabang DEMO · perusahaan saat ini","DEMO branch · current company"),confirmLabel:copy("Tambahkan DEMO","Add DEMO data"),icon:"database"}))return;
  saving.value=true;error.value="";
  try{const result=await api("/demo-data",{confirmation:"SEED_DEMO_KEEP_EXISTING"});message.value=copy(`DEMO: ${result.assets} aset. ${result.already_seeded?"Data sudah tersedia.":"Data ditambahkan."}`,`DEMO: ${result.assets} assets. ${result.already_seeded?"Data already exists.":"Data added."}`);emit("seeded");await load();}
  catch(e){error.value=(e as Error).message;}finally{saving.value=false;}

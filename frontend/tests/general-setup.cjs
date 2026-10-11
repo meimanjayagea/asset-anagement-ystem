@@ -49,13 +49,13 @@ async function exercise(page,check,getLastPost,directory) {
  await page.getByRole("dialog").getByRole("button",{name:"Save",exact:true}).click();
  await page.getByRole("dialog").waitFor({state:"hidden"});
  check(getLastPost().method==="PUT"&&getLastPost().body.version===1,"general code edit version guard");
- page.once("dialog",d=>d.accept());
  await page.getByRole("button",{name:"Archive NEW_GROUP",exact:true}).click();
+ await page.getByRole("alertdialog").getByRole("button",{name:"Archive rule",exact:true}).click();
  await page.locator(".general-setup .loading").waitFor({state:"hidden"});
  await page.getByLabel("Archived",{exact:true}).check();
  await page.getByRole("button",{name:"Restore NEW_GROUP",exact:true}).waitFor();
- page.once("dialog",d=>d.accept());
  await page.getByRole("button",{name:"Restore NEW_GROUP",exact:true}).click();
+ await page.getByRole("alertdialog").getByRole("button",{name:"Restore rule",exact:true}).click();
  await page.getByLabel("Archived",{exact:true}).uncheck();
  await navigate(page,"General Code Detail");
  await page.locator(".general-setup .loading").waitFor({state:"hidden"});

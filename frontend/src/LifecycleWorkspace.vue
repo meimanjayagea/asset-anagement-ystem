@@ -27,6 +27,8 @@ import {
 } from "lucide-vue-next";
 import { api, money, date, type User, type Asset } from "./api";
 import PhotoUploader from "./PhotoUploader.vue";
+import { confirmAction } from "./confirmation";
+import { locale } from "./preferences";
 const props = defineProps<{ branchId: number; user: User }>();
 const tab = ref("catalog"),
   assets = ref<Asset[]>([]),
@@ -342,8 +344,10 @@ async function jobAction(job: any, action: string) {
   }
 }
 async function cancelLoan(loan: any) {
-  const notes = window.prompt("Alasan pembatalan");
-  if (!notes) return;
+  const id=locale.value==="id";
+  const decision=await confirmAction({title:id?"Batalkan peminjaman?":"Cancel loan?",message:id?"Peminjaman akan dibatalkan. Alasan pembatalan akan dicatat dalam riwayat.":"The loan will be cancelled. The cancellation reason will be recorded in history.",subject:loan.asset_tag || loan.asset_name || `#${loan.id}`,confirmLabel:id?"Batalkan peminjaman":"Cancel loan",tone:"danger",icon:"cancel",reasonLabel:id?"Alasan pembatalan":"Reason for cancellation"});
+  if (!decision) return;
+  const notes=decision.reason;
   try {
     await api(`/loans/${loan.id}/action`, { action: "cancel", notes });
     await load();
@@ -360,7 +364,8 @@ async function auditItems(audit: any) {
   }
 }
 async function closeAudit() {
-  if (!window.confirm("Tutup opname dan akui selisih yang tercatat?")) return;
+  const id=locale.value==="id";
+  if (!await confirmAction({title:id?"Tutup opname?":"Close stocktake?",message:id?"Selisih yang tercatat akan diakui dan opname tidak dapat diedit lagi. Pastikan semua temuan dan bukti sudah diperiksa.":"Recorded discrepancies will be acknowledged and the stocktake can no longer be edited. Check all findings and evidence before continuing.",subject:activeAudit.value.title,confirmLabel:id?"Tutup opname":"Close stocktake",icon:"check"})) return;
   try {
     await api(`/stocktakes/${activeAudit.value.id}/close`, {
       acknowledge_discrepancies: true,

@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from "vue";
 import { Download, Plus, RefreshCw, Save, Check, X, Archive, FileText, Landmark, CalendarClock, Scale, ShieldCheck } from "lucide-vue-next";
 import { api, date, money } from "./api";
 import { t } from "./preferences";
+import { confirmAction } from "./confirmation";
 
 const props = defineProps<{ branchId: number; userId: number; finance: boolean; canManage: boolean; canPropose: boolean; canDecide: boolean; contractsRead: boolean; contractsManage: boolean; locale: string }>();
 function copy(id: string, en: string) { return props.locale === "id" ? id : en; }
@@ -50,8 +51,9 @@ async function saveValuation() {
   catch(cause) { error.value=(cause as Error).message; } finally { saving.value=false; }
 }
 async function decide(row:any,approve:boolean) {
-  const note=approve ? "" : window.prompt(props.locale==="id" ? "Alasan penolakan" : "Reason for rejection","");
-  if(!approve&&!note) return;
+  const decision=await confirmAction({title:approve?copy("Setujui valuasi?","Approve valuation?"):copy("Tolak valuasi?","Reject valuation?"),message:approve?copy("Nilai aset akan diperbarui sesuai usulan. Keputusan dan perubahan nilai akan dicatat dalam riwayat.","The asset value will be updated according to the proposal. The decision and value changes will be recorded in history."):copy("Usulan tidak akan diterapkan. Alasan penolakan akan disimpan bersama keputusan.","The proposal will not be applied. The rejection reason will be stored with the decision."),subject:row.asset_tag || row.asset_name || `#${row.id}`,confirmLabel:approve?copy("Setujui valuasi","Approve valuation"):copy("Tolak usulan","Reject proposal"),tone:approve?"warning":"danger",icon:approve?"check":"cancel",reasonLabel:approve?undefined:copy("Alasan penolakan","Reason for rejection")});
+  if(!decision) return;
+  const note=decision.reason;
   try { await api("/finance/valuations/"+row.id+"/decision",{approve,note:note||""}); await load(); }
   catch(cause) { error.value=(cause as Error).message; }
 }
@@ -64,7 +66,7 @@ async function saveContract() {
   } catch(cause) { error.value=(cause as Error).message; } finally { saving.value=false; }
 }
 async function archiveContract(row:any) {
-  if(!window.confirm((props.locale==="id"?"Arsipkan kontrak ":"Archive contract ")+row.name+"?")) return;
+  if(!await confirmAction({title:copy("Arsipkan kontrak?","Archive contract?"),message:copy("Kontrak akan dikeluarkan dari daftar aktif. Data kontrak dan riwayatnya tetap tersimpan.","The contract will leave the active list. Its data and history will be retained."),subject:row.name,confirmLabel:copy("Arsipkan kontrak","Archive contract"),icon:"archive"})) return;
   try { await api("/contracts/"+row.id,undefined,"DELETE"); await load(); } catch(cause) { error.value=(cause as Error).message; }
 }
 async function saveAccounts() {

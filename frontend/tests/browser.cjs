@@ -3,6 +3,7 @@ const path = require("node:path");
 const { navigate } = require("./navigation.cjs");
 const responsive = require("./responsive.cjs");
 const setup = require("./general-setup.cjs");
+const confirmations = require("./confirmations.cjs");
 const base = path.resolve(
   process.env.SCREENSHOT_DIR || path.resolve(__dirname, "../../docs"),
 );
@@ -601,6 +602,7 @@ const baseURL = process.env.TEST_BASE_URL || "http://127.0.0.1:5173";
   );
   await page.getByLabel("Branch filter").selectOption("0");
   await setup.exercise(page,check,()=>lastPost,base);
+  await confirmations(page,check,()=>lastPost,base);
   await responsive(page, check, base);
   await page.setViewportSize({ width: 390, height: 844 });
   await navigate(page, "Overview");
